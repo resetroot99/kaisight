@@ -39,6 +39,13 @@ class EnhancedFamiliarRecognition: ObservableObject {
     private let recognitionQueue = DispatchQueue(label: "recognition.queue", qos: .userInitiated)
     private let trainingQueue = DispatchQueue(label: "training.queue", qos: .background)
     
+    // MARK: - Natural Language Object Learning
+    
+    private let nlObjectLearning = NaturalLanguageObjectLearning()
+    private let speechRecognizer = SpeechRecognizer()
+    private var objectLearningMode = false
+    private var currentLearningSession: ObjectLearningSession?
+    
     init() {
         setupFamiliarRecognition()
     }
@@ -283,11 +290,22 @@ class EnhancedFamiliarRecognition: ObservableObject {
                 }
                 
                 group.notify(queue: .main) {
-                    self.recognizedObjects = recognizedObjects
-                    completion(recognizedObjects)
+                    var enhancedObjects = recognizedObjects
+                    
+                    // Add location context to recognized objects
+                    for i in 0..<enhancedObjects.count {
+                        let objectName = enhancedObjects[i].identity.name
+                        if let locationContext = self.retrieveObjectLocationMemory(objectName: objectName) {
+                            // Enhance the recognition with location confidence
+                            enhancedObjects[i].identity.confidence *= locationContext.confidence
+                        }
+                    }
+                    
+                    self.recognizedObjects = enhancedObjects
+                    completion(enhancedObjects)
                     
                     // Announce recognized objects
-                    self.announceObjectRecognition(recognizedObjects)
+                    self.announceObjectRecognition(enhancedObjects)
                 }
             }
         }
@@ -696,6 +714,377 @@ class EnhancedFamiliarRecognition: ObservableObject {
         let summary = getRecognitionSummary()
         speechOutput.speak(summary)
     }
+    
+    // MARK: - Voice-Activated Learning Interface
+    
+    func enableObjectLearningMode() {
+        objectLearningMode = true
+        speechOutput.speak("Object learning mode activated. You can now say 'Remember this object as my wallet' or similar commands.")
+        startListeningForLearningCommands()
+    }
+    
+    func disableObjectLearningMode() {
+        objectLearningMode = false
+        currentLearningSession = nil
+        speechOutput.speak("Object learning mode deactivated.")
+    }
+    
+    private func startListeningForLearningCommands() {
+        guard objectLearningMode else { return }
+        
+        speechRecognizer.startListening { [weak self] transcript in
+            self?.processLearningCommand(transcript)
+        }
+    }
+    
+    private func processLearningCommand(_ transcript: String) {
+        let command = nlObjectLearning.parseCommand(transcript)
+        
+        switch command.type {
+        case .rememberObject:
+            handleRememberObjectCommand(command)
+            
+        case .findObject:
+            handleFindObjectCommand(command)
+            
+        case .forgetObject:
+            handleForgetObjectCommand(command)
+            
+        case .listObjects:
+            handleListObjectsCommand()
+            
+        case .unknown:
+            speechOutput.speak("I didn't understand that command. Try saying 'Remember this object as my keys' or 'Find my wallet'.")
+        }
+    }
+    
+    private func handleRememberObjectCommand(_ command: LearningCommand) {
+        guard let objectName = command.objectName else {
+            speechOutput.speak("Please specify what to call this object.")
+            return
+        }
+        
+        // Start learning session
+        currentLearningSession = ObjectLearningSession(
+            objectName: objectName,
+            category: command.category ?? "personal_item",
+            startTime: Date()
+        )
+        
+        speechOutput.speak("I'll remember this object as your \(objectName). Please show me the object from different angles.")
+        
+        // Start capture sequence
+        startObjectCaptureSequence(for: objectName)
+    }
+    
+    private func startObjectCaptureSequence(for objectName: String) {
+        let captureInstructions = [
+            "Show me the \(objectName) from the front",
+            "Now turn it to show the back",
+            "Show me the left side",
+            "Show me the right side", 
+            "One final angle from above or below"
+        ]
+        
+        var capturedImages: [ObjectCapture] = []
+        var currentInstruction = 0
+        
+        func captureNextAngle() {
+            guard currentInstruction < captureInstructions.count else {
+                // Complete the learning
+                finishObjectLearning(objectName: objectName, captures: capturedImages)
+                return
+            }
+            
+            speechOutput.speak(captureInstructions[currentInstruction])
+            
+            // Capture image after brief delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                if let image = self.captureCurrentImage() {
+                    let capture = ObjectCapture(
+                        image: image,
+                        angle: AngleDescription.fromIndex(currentInstruction),
+                        timestamp: Date(),
+                        location: self.getCurrentUserLocation()
+                    )
+                    capturedImages.append(capture)
+                    
+                    self.speechOutput.speak("Captured. \(captureInstructions.count - currentInstruction - 1) more angles to go.")
+                    currentInstruction += 1
+                    
+                    // Capture next angle
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        captureNextAngle()
+                    }
+                } else {
+                    self.speechOutput.speak("Failed to capture image. Please try again.")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        captureNextAngle()
+                    }
+                }
+            }
+        }
+        
+        // Start the capture sequence
+        captureNextAngle()
+    }
+    
+    private func finishObjectLearning(objectName: String, captures: [ObjectCapture]) {
+        let images = captures.map { $0.image }
+        
+        trainCustomObject(name: objectName, category: currentLearningSession?.category ?? "personal_item", images: images) { [weak self] success in
+            if success {
+                // Store location context
+                self?.storeObjectLocationContext(objectName: objectName, captures: captures)
+                
+                self?.speechOutput.speak("Successfully learned your \(objectName). I'll remember it and can help you find it later.")
+                
+                // Add to location memory if available
+                if let location = captures.first?.location {
+                    self?.addObjectToLocationMemory(objectName: objectName, location: location)
+                }
+            } else {
+                self?.speechOutput.speak("Sorry, I had trouble learning your \(objectName). Please try again.")
+            }
+            
+            self?.currentLearningSession = nil
+        }
+    }
+    
+    private func handleFindObjectCommand(_ command: LearningCommand) {
+        guard let objectName = command.objectName else {
+            speechOutput.speak("Please specify which object you want to find.")
+            return
+        }
+        
+        // Search for the object in current view
+        searchForLearnedObject(objectName) { [weak self] result in
+            switch result {
+            case .found(let location):
+                self?.speechOutput.speak("I can see your \(objectName) \(location)")
+                
+            case .notVisible:
+                // Check location memory
+                if let lastKnownLocation = self?.getLastKnownLocation(for: objectName) {
+                    self?.speechOutput.speak("I don't see your \(objectName) right now. I last saw it \(lastKnownLocation)")
+                } else {
+                    self?.speechOutput.speak("I don't see your \(objectName) right now, and I don't have a record of where you last placed it.")
+                }
+                
+            case .notLearned:
+                self?.speechOutput.speak("I don't know what your \(objectName) looks like. Would you like to teach me?")
+            }
+        }
+    }
+    
+    private func handleForgetObjectCommand(_ command: LearningCommand) {
+        guard let objectName = command.objectName else {
+            speechOutput.speak("Please specify which object to forget.")
+            return
+        }
+        
+        // Find and remove the object
+        if let objectToRemove = customObjects.first(where: { $0.name.lowercased() == objectName.lowercased() }) {
+            removeObjectIdentity(id: objectToRemove.id)
+            speechOutput.speak("I've forgotten your \(objectName).")
+        } else {
+            speechOutput.speak("I don't have any memory of your \(objectName).")
+        }
+    }
+    
+    private func handleListObjectsCommand() {
+        if customObjects.isEmpty {
+            speechOutput.speak("I haven't learned any of your personal objects yet.")
+        } else {
+            let objectNames = customObjects.map { $0.name }
+            let objectList = objectNames.joined(separator: ", ")
+            speechOutput.speak("I know these objects: \(objectList)")
+        }
+    }
+    
+    // MARK: - Object Search and Location
+    
+    private func searchForLearnedObject(_ objectName: String, completion: @escaping (ObjectSearchResult) -> Void) {
+        guard let currentImage = captureCurrentImage() else {
+            completion(.notVisible)
+            return
+        }
+        
+        recognizeCustomObjects(in: currentImage) { recognizedObjects in
+            for recognizedObject in recognizedObjects {
+                if recognizedObject.identity.name.lowercased() == objectName.lowercased() {
+                    let location = self.describeObjectLocation(recognizedObject.boundingBox)
+                    completion(.found(location: location))
+                    return
+                }
+            }
+            
+            // Check if we know about this object at all
+            let isLearned = self.customObjects.contains { $0.name.lowercased() == objectName.lowercased() }
+            completion(isLearned ? .notVisible : .notLearned)
+        }
+    }
+    
+    private func describeObjectLocation(_ boundingBox: CGRect) -> String {
+        let centerX = boundingBox.midX
+        let centerY = boundingBox.midY
+        
+        var location = ""
+        
+        // Horizontal position
+        if centerX < 0.33 {
+            location += "on your left"
+        } else if centerX > 0.67 {
+            location += "on your right"
+        } else {
+            location += "in front of you"
+        }
+        
+        // Vertical position
+        if centerY < 0.33 {
+            location += ", up high"
+        } else if centerY > 0.67 {
+            location += ", down low"
+        } else {
+            location += ", at eye level"
+        }
+        
+        return location
+    }
+    
+    private func getLastKnownLocation(for objectName: String) -> String? {
+        // Check location memory for this object
+        if let locationMemory = retrieveObjectLocationMemory(objectName: objectName) {
+            let timeAgo = Int(Date().timeIntervalSince(locationMemory.timestamp))
+            
+            if timeAgo < 3600 { // Less than an hour
+                return "in \(locationMemory.locationDescription) about \(timeAgo/60) minutes ago"
+            } else if timeAgo < 86400 { // Less than a day
+                return "in \(locationMemory.locationDescription) about \(timeAgo/3600) hours ago"
+            } else {
+                return "in \(locationMemory.locationDescription) \(timeAgo/86400) days ago"
+            }
+        }
+        
+        return nil
+    }
+    
+    // MARK: - Location Context and Memory
+    
+    private func storeObjectLocationContext(objectName: String, captures: [ObjectCapture]) {
+        guard let representativeCapture = captures.first,
+              let location = representativeCapture.location else { return }
+        
+        let locationMemory = ObjectLocationMemory(
+            objectName: objectName,
+            location: location,
+            locationDescription: describeCurrentLocation(),
+            timestamp: Date(),
+            confidence: 0.9
+        )
+        
+        saveObjectLocationMemory(locationMemory)
+    }
+    
+    private func addObjectToLocationMemory(objectName: String, location: simd_float3) {
+        // This would integrate with the spatial manager to remember where objects are placed
+        // spatialManager.addObjectMemory(objectName: objectName, location: location)
+    }
+    
+    private func describeCurrentLocation() -> String {
+        // This would integrate with spatial/location services to describe current location
+        return "current location" // Placeholder
+    }
+    
+    private func getCurrentUserLocation() -> simd_float3? {
+        // This would integrate with spatial manager to get current user location
+        return nil // Placeholder
+    }
+    
+    private func captureCurrentImage() -> UIImage? {
+        // This would integrate with camera manager to capture current view
+        return nil // Placeholder
+    }
+    
+    // MARK: - Supporting Classes and Data Models
+    
+    enum ObjectSearchResult {
+        case found(location: String)
+        case notVisible
+        case notLearned
+    }
+    
+    struct ObjectCapture {
+        let image: UIImage
+        let angle: AngleDescription
+        let timestamp: Date
+        let location: simd_float3?
+    }
+    
+    enum AngleDescription: String, CaseIterable {
+        case front = "front"
+        case back = "back"
+        case left = "left"
+        case right = "right"
+        case top = "top"
+        case bottom = "bottom"
+        
+        static func fromIndex(_ index: Int) -> AngleDescription {
+            let cases = AngleDescription.allCases
+            return cases[min(index, cases.count - 1)]
+        }
+    }
+    
+    struct ObjectLearningSession {
+        let objectName: String
+        let category: String
+        let startTime: Date
+    }
+    
+    struct ObjectLocationMemory: Codable {
+        let objectName: String
+        let location: simd_float3
+        let locationDescription: String
+        let timestamp: Date
+        let confidence: Float
+        
+        enum CodingKeys: String, CodingKey {
+            case objectName, locationDescription, timestamp, confidence
+            case locationX, locationY, locationZ
+        }
+        
+        init(objectName: String, location: simd_float3, locationDescription: String, timestamp: Date, confidence: Float) {
+            self.objectName = objectName
+            self.location = location
+            self.locationDescription = locationDescription
+            self.timestamp = timestamp
+            self.confidence = confidence
+        }
+        
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            objectName = try container.decode(String.self, forKey: .objectName)
+            locationDescription = try container.decode(String.self, forKey: .locationDescription)
+            timestamp = try container.decode(Date.self, forKey: .timestamp)
+            confidence = try container.decode(Float.self, forKey: .confidence)
+            
+            let x = try container.decode(Float.self, forKey: .locationX)
+            let y = try container.decode(Float.self, forKey: .locationY)
+            let z = try container.decode(Float.self, forKey: .locationZ)
+            location = simd_float3(x, y, z)
+        }
+        
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(objectName, forKey: .objectName)
+            try container.encode(locationDescription, forKey: .locationDescription)
+            try container.encode(timestamp, forKey: .timestamp)
+            try container.encode(confidence, forKey: .confidence)
+            try container.encode(location.x, forKey: .locationX)
+            try container.encode(location.y, forKey: .locationY)
+            try container.encode(location.z, forKey: .locationZ)
+        }
+    }
 }
 
 // MARK: - Training Delegates
@@ -959,5 +1348,229 @@ class RecognitionDataManager {
     
     func saveCustomObjectModel(_ model: MLModel) {
         // Save custom object model
+    }
+}
+
+// MARK: - Natural Language Processing Support
+
+class NaturalLanguageObjectLearning {
+    func parseCommand(_ transcript: String) -> LearningCommand {
+        let lowercased = transcript.lowercased()
+        
+        // Remember patterns
+        if lowercased.contains("remember") && (lowercased.contains("as") || lowercased.contains("this")) {
+            return parseRememberCommand(lowercased)
+        }
+        
+        // Find patterns
+        if lowercased.contains("find") || lowercased.contains("where") || lowercased.contains("locate") {
+            return parseFindCommand(lowercased)
+        }
+        
+        // Forget patterns
+        if lowercased.contains("forget") || lowercased.contains("remove") {
+            return parseForgetCommand(lowercased)
+        }
+        
+        // List patterns
+        if lowercased.contains("list") || lowercased.contains("what objects") || lowercased.contains("show me") {
+            return LearningCommand(type: .listObjects)
+        }
+        
+        return LearningCommand(type: .unknown)
+    }
+    
+    private func parseRememberCommand(_ text: String) -> LearningCommand {
+        // Parse "remember this object as my wallet"
+        // or "remember this as my keys"
+        
+        if let asRange = text.range(of: "as") {
+            let afterAs = String(text[asRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let objectName = afterAs.replacingOccurrences(of: "my ", with: "")
+                           .replacingOccurrences(of: "the ", with: "")
+                           .trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            let category = determineCategory(from: objectName)
+            
+            return LearningCommand(
+                type: .rememberObject,
+                objectName: objectName,
+                category: category
+            )
+        }
+        
+        return LearningCommand(type: .unknown)
+    }
+    
+    private func parseFindCommand(_ text: String) -> LearningCommand {
+        // Parse "find my wallet" or "where is my keys"
+        
+        let words = text.components(separatedBy: .whitespacesAndNewlines)
+        var objectName: String?
+        
+        // Look for patterns like "find my X" or "where is my X"
+        for i in 0..<words.count {
+            if words[i] == "my" && i + 1 < words.count {
+                objectName = words[i + 1]
+                break
+            }
+            if (words[i] == "find" || words[i] == "locate") && i + 1 < words.count {
+                objectName = words[i + 1].replacingOccurrences(of: "my", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !objectName!.isEmpty {
+                    break
+                }
+            }
+        }
+        
+        return LearningCommand(
+            type: .findObject,
+            objectName: objectName
+        )
+    }
+    
+    private func parseForgetCommand(_ text: String) -> LearningCommand {
+        // Parse "forget my wallet"
+        
+        let words = text.components(separatedBy: .whitespacesAndNewlines)
+        var objectName: String?
+        
+        for i in 0..<words.count {
+            if words[i] == "my" && i + 1 < words.count {
+                objectName = words[i + 1]
+                break
+            }
+            if (words[i] == "forget" || words[i] == "remove") && i + 1 < words.count {
+                let candidate = words[i + 1].replacingOccurrences(of: "my", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !candidate.isEmpty {
+                    objectName = candidate
+                    break
+                }
+            }
+        }
+        
+        return LearningCommand(
+            type: .forgetObject,
+            objectName: objectName
+        )
+    }
+    
+    private func determineCategory(from objectName: String) -> String {
+        let lowercased = objectName.lowercased()
+        
+        if ["wallet", "purse", "keys", "phone", "glasses"].contains(lowercased) {
+            return "personal_essential"
+        } else if ["book", "notebook", "pen", "pencil"].contains(lowercased) {
+            return "stationery"
+        } else if ["medicine", "pills", "inhaler"].contains(lowercased) {
+            return "medical"
+        } else {
+            return "personal_item"
+        }
+    }
+}
+
+struct LearningCommand {
+    let type: LearningCommandType
+    let objectName: String?
+    let category: String?
+    
+    init(type: LearningCommandType, objectName: String? = nil, category: String? = nil) {
+        self.type = type
+        self.objectName = objectName
+        self.category = category
+    }
+}
+
+enum LearningCommandType {
+    case rememberObject
+    case findObject
+    case forgetObject
+    case listObjects
+    case unknown
+}
+
+class SpeechRecognizer {
+    func startListening(completion: @escaping (String) -> Void) {
+        // This would integrate with Speech framework for continuous listening
+        // For now, this is a placeholder
+    }
+}
+
+// MARK: - Memory Storage Extensions
+
+private func saveObjectLocationMemory(_ memory: ObjectLocationMemory) {
+    // Save to persistent storage
+    let encoder = JSONEncoder()
+    do {
+        let data = try encoder.encode(memory)
+        UserDefaults.standard.set(data, forKey: "objectLocation_\(memory.objectName)")
+    } catch {
+        Config.debugLog("Failed to save object location memory: \(error)")
+    }
+}
+
+private func retrieveObjectLocationMemory(objectName: String) -> ObjectLocationMemory? {
+    guard let data = UserDefaults.standard.data(forKey: "objectLocation_\(objectName)") else {
+        return nil
+    }
+    
+    let decoder = JSONDecoder()
+    do {
+        return try decoder.decode(ObjectLocationMemory.self, from: data)
+    } catch {
+        Config.debugLog("Failed to retrieve object location memory: \(error)")
+        return nil
+    }
+}
+
+// MARK: - Codable Extensions
+
+extension ObjectLocationMemory: Codable {
+    enum CodingKeys: String, CodingKey {
+        case objectName, locationDescription, timestamp, confidence
+        case locationX, locationY, locationZ
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        objectName = try container.decode(String.self, forKey: .objectName)
+        locationDescription = try container.decode(String.self, forKey: .locationDescription)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        confidence = try container.decode(Float.self, forKey: .confidence)
+        
+        let x = try container.decode(Float.self, forKey: .locationX)
+        let y = try container.decode(Float.self, forKey: .locationY)
+        let z = try container.decode(Float.self, forKey: .locationZ)
+        location = simd_float3(x, y, z)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(objectName, forKey: .objectName)
+        try container.encode(locationDescription, forKey: .locationDescription)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(location.x, forKey: .locationX)
+        try container.encode(location.y, forKey: .locationY)
+        try container.encode(location.z, forKey: .locationZ)
+    }
+}
+
+// MARK: - Public Interface Extensions
+
+func learnObjectFromVoiceCommand(_ command: String) {
+    processLearningCommand(command)
+}
+
+func getLearnedObjectSummary() -> String {
+    let learnedCount = customObjects.count
+    if learnedCount == 0 {
+        return "No personal objects learned yet."
+    } else {
+        let recentlyUsed = customObjects.filter { 
+            Date().timeIntervalSince($0.lastSeen) < 86400 // Last 24 hours
+        }.count
+        
+        return "\(learnedCount) personal objects learned, \(recentlyUsed) seen recently."
     }
 } 

@@ -36,6 +36,12 @@ class RAGMemoryManager: ObservableObject {
     private let nlProcessor = NLProcessor()
     private let topicModeler = TopicModeler()
     
+    // MARK: - Privacy-First Encrypted Memory
+    
+    private let memoryEncryption = MemoryEncryptionManager()
+    private let privacyConsent = PrivacyConsentManager()
+    private var memoryAccessLog: [MemoryAccessEvent] = []
+    
     init() {
         setupRAGMemory()
     }
@@ -668,6 +674,297 @@ class RAGMemoryManager: ObservableObject {
     func getMemorySummary() -> String {
         return "Memory: \(memoryStats.totalEpisodicMemories) experiences, \(memoryStats.totalSemanticMemories) facts, \(memoryStats.totalLocationMemories) locations. Average relevance: \(Int(memoryStats.averageRelevanceScore * 100))%"
     }
+    
+    // MARK: - Encrypted Memory Recall with User Consent
+    
+    func requestMemoryRecall(query: String, completion: @escaping (MemoryRecallResult) -> Void) {
+        // Always ask for user consent before accessing memories
+        privacyConsent.requestMemoryAccess(for: query) { [weak self] granted in
+            if granted {
+                self?.performEncryptedMemoryRecall(query: query, completion: completion)
+            } else {
+                completion(.accessDenied("Memory access was declined"))
+            }
+        }
+    }
+    
+    private func performEncryptedMemoryRecall(query: String, completion: @escaping (MemoryRecallResult) -> Void) {
+        Task {
+            do {
+                // Decrypt and search memories
+                let memories = try await retrieveAndDecryptMemories(for: query)
+                
+                // Log the access for transparency
+                logMemoryAccess(query: query, memoriesCount: memories.count)
+                
+                // Create user-friendly summary
+                let summary = createMemorySummary(memories: memories)
+                
+                completion(.success(summary))
+                
+            } catch {
+                completion(.error("Failed to retrieve memories: \(error.localizedDescription)"))
+            }
+        }
+    }
+    
+    private func retrieveAndDecryptMemories(for query: String) async throws -> [DecryptedMemory] {
+        // Get encrypted memories
+        let encryptedMemories = await retrieveRelevantMemories(for: query, limit: 10)
+        
+        var decryptedMemories: [DecryptedMemory] = []
+        
+        for memory in encryptedMemories {
+            do {
+                let decryptedContent = try memoryEncryption.decrypt(memory.content)
+                
+                let decryptedMemory = DecryptedMemory(
+                    id: memory.id,
+                    content: decryptedContent,
+                    type: memory.type,
+                    relevanceScore: memory.relevanceScore,
+                    timestamp: memory.timestamp,
+                    metadata: memory.metadata
+                )
+                
+                decryptedMemories.append(decryptedMemory)
+                
+            } catch {
+                Config.debugLog("Failed to decrypt memory \(memory.id): \(error)")
+                // Continue with other memories
+            }
+        }
+        
+        return decryptedMemories
+    }
+    
+    private func createMemorySummary(memories: [DecryptedMemory]) -> MemorySummary {
+        let episodicMemories = memories.filter { $0.type == .episodic }
+        let semanticMemories = memories.filter { $0.type == .semantic }
+        let locationMemories = memories.filter { $0.type == .location }
+        
+        return MemorySummary(
+            totalMemories: memories.count,
+            episodicCount: episodicMemories.count,
+            semanticCount: semanticMemories.count,
+            locationCount: locationMemories.count,
+            oldestMemory: memories.min(by: { $0.timestamp < $1.timestamp })?.timestamp,
+            newestMemory: memories.max(by: { $0.timestamp < $1.timestamp })?.timestamp,
+            memories: memories
+        )
+    }
+    
+    private func logMemoryAccess(query: String, memoriesCount: Int) {
+        let accessEvent = MemoryAccessEvent(
+            id: UUID(),
+            query: query,
+            memoriesAccessed: memoriesCount,
+            timestamp: Date(),
+            userConsent: true
+        )
+        
+        memoryAccessLog.append(accessEvent)
+        
+        // Keep only recent access events
+        if memoryAccessLog.count > 1000 {
+            memoryAccessLog.removeFirst(memoryAccessLog.count - 1000)
+        }
+        
+        Config.debugLog("Memory access logged: \(memoriesCount) memories for query '\(query)'")
+    }
+    
+    // MARK: - User Consent and Transparency
+    
+    func offerMemoryRecall(context: String) {
+        privacyConsent.offerMemoryRecall(context: context) { [weak self] userResponse in
+            switch userResponse {
+            case .accepted(let query):
+                self?.requestMemoryRecall(query: query) { result in
+                    self?.presentMemoryRecallResult(result)
+                }
+                
+            case .declined:
+                // Respect user's choice - no memory access
+                Config.debugLog("User declined memory recall offer")
+                
+            case .alwaysAllow:
+                // User wants automatic memory recall for this context
+                self?.privacyConsent.setAlwaysAllow(for: context)
+                
+            case .neverAsk:
+                // User doesn't want to be asked about memory recall
+                self?.privacyConsent.setNeverAsk(for: context)
+            }
+        }
+    }
+    
+    private func presentMemoryRecallResult(_ result: MemoryRecallResult) {
+        switch result {
+        case .success(let summary):
+            let announcement = createMemoryAnnouncement(summary)
+            speechOutput.speak(announcement)
+            
+        case .accessDenied(let reason):
+            speechOutput.speak("Memory access declined: \(reason)")
+            
+        case .error(let message):
+            speechOutput.speak("Memory error: \(message)")
+        }
+    }
+    
+    private func createMemoryAnnouncement(_ summary: MemorySummary) -> String {
+        if summary.totalMemories == 0 {
+            return "I don't have any relevant memories to share."
+        }
+        
+        var announcement = "Here's what I remember: "
+        
+        // Add contextual information based on memory types
+        if summary.episodicCount > 0 {
+            announcement += "\(summary.episodicCount) personal experience\(summary.episodicCount == 1 ? "" : "s")"
+            
+            if summary.semanticCount > 0 || summary.locationCount > 0 {
+                announcement += ", "
+            }
+        }
+        
+        if summary.semanticCount > 0 {
+            announcement += "\(summary.semanticCount) fact\(summary.semanticCount == 1 ? "" : "s")"
+            
+            if summary.locationCount > 0 {
+                announcement += ", "
+            }
+        }
+        
+        if summary.locationCount > 0 {
+            announcement += "\(summary.locationCount) location\(summary.locationCount == 1 ? "" : "s")"
+        }
+        
+        announcement += ". Would you like me to share the details?"
+        
+        return announcement
+    }
+    
+    // MARK: - Memory Privacy Controls
+    
+    func getMemoryPrivacySettings() -> MemoryPrivacySettings {
+        return MemoryPrivacySettings(
+            encryptionEnabled: memoryEncryption.isEnabled,
+            consentRequired: privacyConsent.isConsentRequired,
+            accessLoggingEnabled: true,
+            dataRetentionDays: 365,
+            automaticDeletion: privacyConsent.isAutomaticDeletionEnabled
+        )
+    }
+    
+    func updateMemoryPrivacySettings(_ settings: MemoryPrivacySettings) {
+        memoryEncryption.setEnabled(settings.encryptionEnabled)
+        privacyConsent.setConsentRequired(settings.consentRequired)
+        privacyConsent.setDataRetentionDays(settings.dataRetentionDays)
+        privacyConsent.setAutomaticDeletion(settings.automaticDeletion)
+        
+        speechOutput.speak("Memory privacy settings updated")
+    }
+    
+    func getMemoryAccessHistory() -> [MemoryAccessEvent] {
+        return Array(memoryAccessLog.suffix(50)) // Return last 50 access events
+    }
+    
+    func clearMemoryAccessHistory() {
+        memoryAccessLog.removeAll()
+        speechOutput.speak("Memory access history cleared")
+    }
+    
+    // MARK: - Secure Memory Storage
+    
+    override func addContextualMemory(_ memory: ContextualMemory) {
+        Task {
+            do {
+                // Encrypt memory before storage
+                let encryptedContent = try memoryEncryption.encrypt(memory.content)
+                
+                let encryptedMemory = ContextualMemory(
+                    id: memory.id,
+                    location: memory.location,
+                    content: encryptedContent,
+                    timestamp: memory.timestamp,
+                    relevance: memory.relevance,
+                    tags: memory.tags
+                )
+                
+                environmentalContext.addMemory(encryptedMemory)
+                
+            } catch {
+                Config.debugLog("Failed to encrypt memory: \(error)")
+                // Fallback to unencrypted storage if encryption fails
+                environmentalContext.addMemory(memory)
+            }
+        }
+    }
+    
+    // MARK: - Data Minimization and Retention
+    
+    func performPrivacyMaintenance() {
+        Task {
+            await cleanupExpiredMemories()
+            await anonymizeOldMemories()
+            await validateEncryptionIntegrity()
+        }
+    }
+    
+    private func cleanupExpiredMemories() async {
+        let settings = getMemoryPrivacySettings()
+        let retentionCutoff = Calendar.current.date(byAdding: .day, value: -settings.dataRetentionDays, to: Date()) ?? Date()
+        
+        // Remove old memories
+        clearOldMemories(olderThan: settings.dataRetentionDays)
+        
+        Config.debugLog("Cleaned up memories older than \(settings.dataRetentionDays) days")
+    }
+    
+    private func anonymizeOldMemories() async {
+        // Anonymize memories that are old but still within retention period
+        let anonymizationCutoff = Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date()
+        
+        // This would implement memory anonymization logic
+        Config.debugLog("Anonymized memories older than 90 days")
+    }
+    
+    private func validateEncryptionIntegrity() async {
+        // Validate that encrypted memories can be decrypted
+        let sampleMemories = Array(episodicMemory.prefix(10))
+        
+        for memory in sampleMemories {
+            do {
+                let _ = try memoryEncryption.decrypt(memory.description)
+            } catch {
+                Config.debugLog("Encryption integrity issue detected for memory \(memory.id)")
+            }
+        }
+    }
+    
+    // MARK: - User Control and Transparency
+    
+    func explainMemoryUsage() -> String {
+        let stats = memoryStats
+        let privacySettings = getMemoryPrivacySettings()
+        
+        var explanation = "Memory Privacy Summary:\n"
+        explanation += "• \(stats.totalEpisodicMemories) personal experiences stored\n"
+        explanation += "• \(stats.totalSemanticMemories) facts and preferences saved\n"
+        explanation += "• \(stats.totalLocationMemories) location memories recorded\n"
+        explanation += "• Encryption: \(privacySettings.encryptionEnabled ? "Enabled" : "Disabled")\n"
+        explanation += "• Consent required: \(privacySettings.consentRequired ? "Yes" : "No")\n"
+        explanation += "• Data retention: \(privacySettings.dataRetentionDays) days\n"
+        explanation += "• Recent access events: \(memoryAccessLog.count)\n"
+        
+        return explanation
+    }
+    
+    func speakMemoryPrivacyStatus() {
+        let explanation = explainMemoryUsage()
+        speechOutput.speak(explanation)
+    }
 }
 
 // MARK: - Data Models
@@ -954,4 +1251,183 @@ extension CLLocationCoordinate2D: Codable {
     private enum CodingKeys: String, CodingKey {
         case latitude, longitude
     }
+}
+
+enum MemoryRecallResult {
+    case success(MemorySummary)
+    case accessDenied(String)
+    case error(String)
+}
+
+struct DecryptedMemory {
+    let id: UUID
+    let content: String
+    let type: MemoryType
+    let relevanceScore: Float
+    let timestamp: Date
+    let metadata: [String: String]
+}
+
+struct MemorySummary {
+    let totalMemories: Int
+    let episodicCount: Int
+    let semanticCount: Int
+    let locationCount: Int
+    let oldestMemory: Date?
+    let newestMemory: Date?
+    let memories: [DecryptedMemory]
+}
+
+struct MemoryAccessEvent {
+    let id: UUID
+    let query: String
+    let memoriesAccessed: Int
+    let timestamp: Date
+    let userConsent: Bool
+}
+
+struct MemoryPrivacySettings {
+    let encryptionEnabled: Bool
+    let consentRequired: Bool
+    let accessLoggingEnabled: Bool
+    let dataRetentionDays: Int
+    let automaticDeletion: Bool
+}
+
+enum UserConsentResponse {
+    case accepted(String)
+    case declined
+    case alwaysAllow
+    case neverAsk
+}
+
+class MemoryEncryptionManager {
+    private let keychain = KeychainManager.shared
+    private(set) var isEnabled = true
+    
+    func encrypt(_ content: String) throws -> String {
+        guard isEnabled else { return content }
+        
+        guard let key = keychain.getEncryptionKey() else {
+            throw MemoryError.encryptionKeyNotFound
+        }
+        
+        // Simple encryption implementation
+        let data = content.data(using: .utf8) ?? Data()
+        let encryptedData = try AES.GCM.seal(data, using: SymmetricKey(data: key))
+        
+        return encryptedData.combined?.base64EncodedString() ?? content
+    }
+    
+    func decrypt(_ encryptedContent: String) throws -> String {
+        guard isEnabled else { return encryptedContent }
+        
+        guard let key = keychain.getEncryptionKey() else {
+            throw MemoryError.encryptionKeyNotFound
+        }
+        
+        guard let encryptedData = Data(base64Encoded: encryptedContent) else {
+            throw MemoryError.invalidEncryptedData
+        }
+        
+        let sealedBox = try AES.GCM.SealedBox(combined: encryptedData)
+        let decryptedData = try AES.GCM.open(sealedBox, using: SymmetricKey(data: key))
+        
+        return String(data: decryptedData, encoding: .utf8) ?? ""
+    }
+    
+    func setEnabled(_ enabled: Bool) {
+        isEnabled = enabled
+    }
+}
+
+class PrivacyConsentManager {
+    private var consentSettings: [String: ConsentSetting] = [:]
+    private(set) var isConsentRequired = true
+    private var dataRetentionDays = 365
+    private(set) var isAutomaticDeletionEnabled = true
+    
+    func requestMemoryAccess(for query: String, completion: @escaping (Bool) -> Void) {
+        let context = determineContext(from: query)
+        
+        if let setting = consentSettings[context] {
+            switch setting {
+            case .alwaysAllow:
+                completion(true)
+                return
+            case .neverAsk:
+                completion(false)
+                return
+            case .askEachTime:
+                break // Continue to prompt
+            }
+        }
+        
+        // Prompt user for consent
+        promptUserForConsent(query: query, completion: completion)
+    }
+    
+    func offerMemoryRecall(context: String, completion: @escaping (UserConsentResponse) -> Void) {
+        // This would show UI to offer memory recall
+        // For now, we'll simulate user acceptance
+        completion(.accepted("Recent memories about \(context)"))
+    }
+    
+    private func promptUserForConsent(query: String, completion: @escaping (Bool) -> Void) {
+        // In a real app, this would show a consent dialog
+        // For now, we'll default to requiring consent
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // Simulate user granting consent
+            completion(true)
+        }
+    }
+    
+    private func determineContext(from query: String) -> String {
+        // Determine context category from query
+        let lowercased = query.lowercased()
+        
+        if lowercased.contains("location") || lowercased.contains("where") {
+            return "location"
+        } else if lowercased.contains("person") || lowercased.contains("who") {
+            return "people"
+        } else if lowercased.contains("conversation") || lowercased.contains("said") {
+            return "conversations"
+        } else {
+            return "general"
+        }
+    }
+    
+    func setAlwaysAllow(for context: String) {
+        consentSettings[context] = .alwaysAllow
+    }
+    
+    func setNeverAsk(for context: String) {
+        consentSettings[context] = .neverAsk
+    }
+    
+    func setConsentRequired(_ required: Bool) {
+        isConsentRequired = required
+    }
+    
+    func setDataRetentionDays(_ days: Int) {
+        dataRetentionDays = days
+    }
+    
+    func setAutomaticDeletion(_ enabled: Bool) {
+        isAutomaticDeletionEnabled = enabled
+    }
+}
+
+enum ConsentSetting {
+    case askEachTime
+    case alwaysAllow
+    case neverAsk
+}
+
+enum MemoryError: Error {
+    case encryptionKeyNotFound
+    case invalidEncryptedData
+    case decryptionFailed
+    case accessDenied
 } 

@@ -32,6 +32,346 @@ class AgentLoopManager: NSObject, ObservableObject {
     private var silenceTimer: Timer?
     private let silenceThreshold: TimeInterval = 2.0
     
+    // Enhanced Wake Word Detection with Noise Management
+    private var noiseDetector = NoiseDetector()
+    private var adaptiveThreshold: Float = 0.75
+    private var environmentalNoiseLevel: Float = 0.0
+    private var consecutiveWakeWordAttempts = 0
+    private let maxFalsePositives = 3
+    
+    // MARK: - Autonomous Decision Making
+    
+    private let decisionEngine = AutonomousDecisionEngine()
+    private var lastUserMovement: Date?
+    private var lastEnvironmentalCheck: Date?
+    private let inactivityThreshold: TimeInterval = 7200 // 2 hours
+    private let environmentalCheckInterval: TimeInterval = 60 // 1 minute
+    
+    // MARK: - Proactive Monitoring
+    
+    private func setupProactiveMonitoring() {
+        // Start autonomous monitoring
+        decisionEngine.delegate = self
+        decisionEngine.startMonitoring()
+        
+        // Schedule periodic checks
+        Timer.scheduledTimer(withTimeInterval: environmentalCheckInterval, repeats: true) { _ in
+            self.performAutonomousCheck()
+        }
+        
+        Config.debugLog("Proactive monitoring initialized")
+    }
+    
+    private func performAutonomousCheck() {
+        guard agentState != .processing else { return }
+        
+        let currentTime = Date()
+        lastEnvironmentalCheck = currentTime
+        
+        // Check for various risk factors
+        let risks = decisionEngine.assessEnvironmentalRisks()
+        
+        for risk in risks {
+            handleDetectedRisk(risk)
+        }
+        
+        // Check user inactivity
+        checkUserInactivity(at: currentTime)
+        
+        // Check lighting conditions
+        checkLightingConditions()
+        
+        // Check for new obstacles or changes
+        checkEnvironmentalChanges()
+    }
+    
+    private func handleDetectedRisk(_ risk: EnvironmentalRisk) {
+        switch risk.severity {
+        case .critical:
+            // Immediate intervention required
+            agentState = .activated
+            speechManager.speak(risk.message, priority: .critical)
+            
+            // Log critical risk
+            Config.debugLog("CRITICAL RISK: \(risk.description)")
+            
+            // Consider emergency actions
+            if risk.type == .emergencyDetected {
+                triggerEmergencyProtocol()
+            }
+            
+        case .high:
+            // Proactive warning
+            speechManager.speak(risk.message, priority: .high)
+            Config.debugLog("HIGH RISK: \(risk.description)")
+            
+        case .medium:
+            // Gentle suggestion
+            if shouldProvideGuidance(for: risk) {
+                speechManager.speak(risk.message, priority: .medium)
+            }
+            
+        case .low:
+            // Silent monitoring or subtle notification
+            Config.debugLog("LOW RISK: \(risk.description)")
+        }
+    }
+    
+    private func checkUserInactivity(at currentTime: Date) {
+        guard let lastMovement = lastUserMovement else {
+            lastUserMovement = currentTime
+            return
+        }
+        
+        let inactivityDuration = currentTime.timeIntervalSince(lastMovement)
+        
+        if inactivityDuration > inactivityThreshold {
+            let risk = EnvironmentalRisk(
+                type: .userInactivity,
+                severity: .medium,
+                message: "You haven't moved for \(Int(inactivityDuration/3600)) hours. Would you like me to check if you're okay?",
+                description: "User inactivity detected",
+                location: nil,
+                confidence: 0.9
+            )
+            
+            handleDetectedRisk(risk)
+            
+            // Reset timer after notification
+            lastUserMovement = currentTime
+        }
+    }
+    
+    private func checkLightingConditions() {
+        // This would integrate with camera/light sensor data
+        let lightingLevel = getCurrentLightingLevel()
+        
+        if lightingLevel < 0.2 { // Very dark
+            let risk = EnvironmentalRisk(
+                type: .poorLighting,
+                severity: .medium,
+                message: "Lighting is very low. Consider turning on lights for safer navigation.",
+                description: "Poor lighting conditions detected",
+                location: nil,
+                confidence: 0.8
+            )
+            
+            handleDetectedRisk(risk)
+        }
+    }
+    
+    private func checkEnvironmentalChanges() {
+        // This would integrate with spatial manager for obstacle detection
+        let newObstacles = detectNewObstacles()
+        
+        for obstacle in newObstacles {
+            let severity: RiskSeverity = obstacle.isInPath ? .high : .medium
+            
+            let risk = EnvironmentalRisk(
+                type: .obstacleDetected,
+                severity: severity,
+                message: "New obstacle detected \(obstacle.direction). \(obstacle.description)",
+                description: "Environmental obstacle: \(obstacle.description)",
+                location: obstacle.position,
+                confidence: obstacle.confidence
+            )
+            
+            handleDetectedRisk(risk)
+        }
+    }
+    
+    private func shouldProvideGuidance(for risk: EnvironmentalRisk) -> Bool {
+        // Rate limiting to avoid overwhelming user
+        let timeSinceLastGuidance = Date().timeIntervalSince(lastEnvironmentalCheck ?? Date.distantPast)
+        
+        return timeSinceLastGuidance > 300 || risk.severity >= .high
+    }
+    
+    private func triggerEmergencyProtocol() {
+        // Emergency response protocol
+        speechManager.speak("Emergency situation detected. Activating emergency assistance.", priority: .critical)
+        
+        // Could integrate with emergency contacts or services
+        // emergencyContactManager.alertEmergencyContacts()
+        
+        Config.debugLog("EMERGENCY PROTOCOL ACTIVATED")
+    }
+    
+    // MARK: - User Activity Tracking
+    
+    func updateUserMovement() {
+        lastUserMovement = Date()
+    }
+    
+    func reportUserLocation(_ location: simd_float3) {
+        decisionEngine.updateUserLocation(location)
+    }
+    
+    // MARK: - Environmental Data Integration
+    
+    private func getCurrentLightingLevel() -> Float {
+        // Would integrate with camera or light sensor
+        return 0.5 // Placeholder
+    }
+    
+    private func detectNewObstacles() -> [ObstacleInfo] {
+        // Would integrate with spatial manager
+        return [] // Placeholder
+    }
+    
+    // MARK: - Decision Engine Integration
+    
+    extension AgentLoopManager: AutonomousDecisionEngineDelegate {
+        func decisionEngine(_ engine: AutonomousDecisionEngine, detectedRisk risk: EnvironmentalRisk) {
+            handleDetectedRisk(risk)
+        }
+        
+        func decisionEngine(_ engine: AutonomousDecisionEngine, recommendsAction action: ProactiveAction) {
+            executeProactiveAction(action)
+        }
+    }
+    
+    private func executeProactiveAction(_ action: ProactiveAction) {
+        switch action.type {
+        case .navigationGuidance:
+            speechManager.speak(action.message, priority: .medium)
+            
+        case .environmentalAlert:
+            speechManager.speak(action.message, priority: .high)
+            
+        case .healthCheck:
+            speechManager.speak(action.message, priority: .low)
+            
+        case .emergencyResponse:
+            triggerEmergencyProtocol()
+        }
+    }
+    
+    // MARK: - Supporting Classes and Protocols
+    
+    class AutonomousDecisionEngine {
+        weak var delegate: AutonomousDecisionEngineDelegate?
+        
+        private var userLocation: simd_float3?
+        private var environmentalData: EnvironmentalData = EnvironmentalData()
+        private var riskAssessment = RiskAssessmentEngine()
+        
+        func startMonitoring() {
+            // Initialize continuous monitoring
+            Config.debugLog("Autonomous decision engine started")
+        }
+        
+        func updateUserLocation(_ location: simd_float3) {
+            userLocation = location
+        }
+        
+        func assessEnvironmentalRisks() -> [EnvironmentalRisk] {
+            return riskAssessment.analyzeCurrentConditions(
+                location: userLocation,
+                environmentalData: environmentalData
+            )
+        }
+    }
+    
+    protocol AutonomousDecisionEngineDelegate: AnyObject {
+        func decisionEngine(_ engine: AutonomousDecisionEngine, detectedRisk risk: EnvironmentalRisk)
+        func decisionEngine(_ engine: AutonomousDecisionEngine, recommendsAction action: ProactiveAction)
+    }
+    
+    struct EnvironmentalRisk {
+        let type: RiskType
+        let severity: RiskSeverity
+        let message: String
+        let description: String
+        let location: simd_float3?
+        let confidence: Float
+    }
+    
+    enum RiskType {
+        case obstacleDetected
+        case userInactivity
+        case poorLighting
+        case unsafeEnvironment
+        case emergencyDetected
+        case navigationHazard
+    }
+    
+    enum RiskSeverity: Comparable {
+        case low
+        case medium
+        case high
+        case critical
+    }
+    
+    struct ProactiveAction {
+        let type: ActionType
+        let message: String
+        let priority: ActionPriority
+    }
+    
+    enum ActionType {
+        case navigationGuidance
+        case environmentalAlert
+        case healthCheck
+        case emergencyResponse
+    }
+    
+    enum ActionPriority {
+        case low
+        case medium
+        case high
+        case critical
+    }
+    
+    struct ObstacleInfo {
+        let position: simd_float3
+        let description: String
+        let direction: String
+        let isInPath: Bool
+        let confidence: Float
+    }
+    
+    class EnvironmentalData {
+        var lightingLevel: Float = 0.5
+        var noiseLevel: Float = 0.3
+        var temperature: Float = 20.0
+        var obstacles: [ObstacleInfo] = []
+    }
+    
+    class RiskAssessmentEngine {
+        func analyzeCurrentConditions(location: simd_float3?, environmentalData: EnvironmentalData) -> [EnvironmentalRisk] {
+            var risks: [EnvironmentalRisk] = []
+            
+            // Analyze lighting
+            if environmentalData.lightingLevel < 0.3 {
+                risks.append(EnvironmentalRisk(
+                    type: .poorLighting,
+                    severity: .medium,
+                    message: "Low light detected. Consider additional lighting.",
+                    description: "Poor lighting conditions",
+                    location: location,
+                    confidence: 0.8
+                ))
+            }
+            
+            // Analyze obstacles
+            for obstacle in environmentalData.obstacles {
+                if obstacle.isInPath {
+                    risks.append(EnvironmentalRisk(
+                        type: .obstacleDetected,
+                        severity: .high,
+                        message: "Obstacle ahead: \(obstacle.description)",
+                        description: "Path obstacle detected",
+                        location: obstacle.position,
+                        confidence: obstacle.confidence
+                    ))
+                }
+            }
+            
+            return risks
+        }
+    }
+    
     override init() {
         super.init()
         setupAgentLoop()
@@ -43,6 +383,7 @@ class AgentLoopManager: NSObject, ObservableObject {
         setupSpeechRecognition()
         setupVoiceActivityDetection()
         startWakeWordDetection()
+        setupProactiveMonitoring()
         
         Config.debugLog("Agent loop manager initialized")
     }
@@ -73,6 +414,9 @@ class AgentLoopManager: NSObject, ObservableObject {
             voiceThreshold: -20.0,   // dB
             minimumSpeechDuration: 0.5
         )
+        
+        // Configure noise detection
+        noiseDetector = NoiseDetector()
     }
     
     // MARK: - Wake Word Detection
@@ -142,13 +486,135 @@ class AgentLoopManager: NSObject, ObservableObject {
     }
     
     private func checkForWakeWord(in transcript: String) {
+        // Pre-filter based on environmental conditions
+        guard shouldProcessWakeWord() else { return }
+        
+        let normalizedTranscript = transcript.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
         for wakeWord in wakeWords {
-            if transcript.contains(wakeWord) {
-                wakeWordDetected = true
-                activateAgent()
-                break
+            let confidence = calculateWakeWordConfidence(transcript: normalizedTranscript, wakeWord: wakeWord)
+            
+            if confidence > adaptiveThreshold {
+                // Verify with secondary confirmation to reduce false positives
+                if verifyWakeWordActivation(transcript: normalizedTranscript, confidence: confidence) {
+                    wakeWordDetected = true
+                    resetFalsePositiveCounter()
+                    activateAgent()
+                    break
+                } else {
+                    handlePotentialFalsePositive()
+                }
             }
         }
+    }
+    
+    private func shouldProcessWakeWord() -> Bool {
+        // Check noise levels
+        if environmentalNoiseLevel > 0.8 {
+            Config.debugLog("Skipping wake word processing due to high noise levels")
+            return false
+        }
+        
+        // Check recent false positives
+        if consecutiveWakeWordAttempts > maxFalsePositives {
+            Config.debugLog("Temporarily disabling wake word due to false positives")
+            return false
+        }
+        
+        return true
+    }
+    
+    private func calculateWakeWordConfidence(transcript: String, wakeWord: String) -> Float {
+        // Fuzzy matching with edit distance
+        let editDistance = levenshteinDistance(transcript, wakeWord)
+        let maxLength = max(transcript.count, wakeWord.count)
+        let similarity = 1.0 - (Float(editDistance) / Float(maxLength))
+        
+        // Adjust for environmental factors
+        let environmentalAdjustment = 1.0 - (environmentalNoiseLevel * 0.3)
+        
+        return similarity * environmentalAdjustment
+    }
+    
+    private func verifyWakeWordActivation(transcript: String, confidence: Float) -> Bool {
+        // Secondary verification using different criteria
+        let wordsInTranscript = transcript.components(separatedBy: .whitespacesAndNewlines)
+        
+        // Check if wake word appears as isolated words (not part of other words)
+        for wakeWord in wakeWords {
+            let wakeWordComponents = wakeWord.components(separatedBy: " ")
+            if containsSequentialWords(wordsInTranscript, wakeWordComponents) {
+                return true
+            }
+        }
+        
+        return confidence > 0.9 // Higher threshold for less obvious matches
+    }
+    
+    private func containsSequentialWords(_ transcript: [String], _ wakeWords: [String]) -> Bool {
+        guard wakeWords.count <= transcript.count else { return false }
+        
+        for i in 0...(transcript.count - wakeWords.count) {
+            let slice = Array(transcript[i..<(i + wakeWords.count)])
+            if slice.map({ $0.lowercased() }) == wakeWords.map({ $0.lowercased() }) {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    private func handlePotentialFalsePositive() {
+        consecutiveWakeWordAttempts += 1
+        
+        if consecutiveWakeWordAttempts >= maxFalsePositives {
+            // Temporarily increase threshold and add cooling period
+            adaptiveThreshold = min(adaptiveThreshold + 0.1, 0.95)
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30.0) {
+                self.resetFalsePositiveCounter()
+            }
+            
+            Config.debugLog("Adaptive threshold increased due to false positives")
+        }
+    }
+    
+    private func resetFalsePositiveCounter() {
+        consecutiveWakeWordAttempts = 0
+        adaptiveThreshold = max(adaptiveThreshold - 0.05, 0.75) // Gradually lower threshold
+    }
+    
+    private func levenshteinDistance(_ s1: String, _ s2: String) -> Int {
+        let s1Array = Array(s1)
+        let s2Array = Array(s2)
+        let s1Count = s1Array.count
+        let s2Count = s2Array.count
+        
+        var matrix = Array(repeating: Array(repeating: 0, count: s2Count + 1), count: s1Count + 1)
+        
+        for i in 0...s1Count {
+            matrix[i][0] = i
+        }
+        
+        for j in 0...s2Count {
+            matrix[0][j] = j
+        }
+        
+        for i in 1...s1Count {
+            for j in 1...s2Count {
+                if s1Array[i-1] == s2Array[j-1] {
+                    matrix[i][j] = matrix[i-1][j-1]
+                } else {
+                    matrix[i][j] = min(
+                        matrix[i-1][j] + 1,
+                        matrix[i][j-1] + 1,
+                        matrix[i-1][j-1] + 1
+                    )
+                }
+            }
+        }
+        
+        return matrix[s1Count][s2Count]
     }
     
     // MARK: - Agent Activation
@@ -471,6 +937,13 @@ class VoiceActivityDetector {
         self.minimumSpeechDuration = minimumSpeechDuration
     }
     
+    func adjustForNoise(level: Float) {
+        // Dynamically adjust thresholds based on noise level
+        let noiseAdjustment = level * 10.0 // Scale noise level
+        self.voiceThreshold = min(-15.0, -20.0 + noiseAdjustment)
+        self.silenceThreshold = min(-25.0, -30.0 + noiseAdjustment)
+    }
+    
     func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
         let averageLevel = calculateAverageLevel(buffer)
         
@@ -507,4 +980,57 @@ class VoiceActivityDetector {
 protocol VoiceActivityDetectorDelegate: AnyObject {
     func voiceActivityDidStart()
     func voiceActivityDidEnd()
+}
+
+// MARK: - Noise Detection and Environmental Awareness
+
+class NoiseDetector {
+    private var recentNoiseReadings: [Float] = []
+    private let maxReadings = 10
+    
+    func updateNoiseLevel(_ level: Float) {
+        recentNoiseReadings.append(level)
+        
+        if recentNoiseReadings.count > maxReadings {
+            recentNoiseReadings.removeFirst()
+        }
+    }
+    
+    func getCurrentNoiseLevel() -> Float {
+        guard !recentNoiseReadings.isEmpty else { return 0.0 }
+        return recentNoiseReadings.reduce(0, +) / Float(recentNoiseReadings.count)
+    }
+    
+    func isNoisyEnvironment() -> Bool {
+        return getCurrentNoiseLevel() > 0.7
+    }
+}
+
+// MARK: - Audio Processing Extensions
+
+extension AgentLoopManager {
+    func updateEnvironmentalNoise(from audioBuffer: AVAudioPCMBuffer) {
+        let noiseLevel = calculateNoiseLevel(audioBuffer)
+        noiseDetector.updateNoiseLevel(noiseLevel)
+        environmentalNoiseLevel = noiseDetector.getCurrentNoiseLevel()
+        
+        // Adapt behavior based on noise
+        if noiseDetector.isNoisyEnvironment() {
+            voiceActivityDetector.adjustForNoise(level: environmentalNoiseLevel)
+        }
+    }
+    
+    private func calculateNoiseLevel(_ buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData?[0] else { return 0.0 }
+        
+        let frameLength = Int(buffer.frameLength)
+        var rms: Float = 0.0
+        
+        for i in 0..<frameLength {
+            rms += channelData[i] * channelData[i]
+        }
+        
+        rms = sqrt(rms / Float(frameLength))
+        return min(rms * 10, 1.0) // Normalize to 0-1 range
+    }
 } 

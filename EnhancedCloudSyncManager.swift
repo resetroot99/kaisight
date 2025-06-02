@@ -36,24 +36,36 @@ class EnhancedCloudSyncManager: ObservableObject {
     // Error handling and retry
     private var retryManager = RetryManager()
     
+    // MARK: - Enhanced Fallback and Recovery
+    
+    private var syncRecoveryManager = SyncRecoveryManager()
+    private var offlineQueue = OfflineOperationQueue()
+    private var networkMonitor = NetworkMonitor()
+    private var syncHealthMonitor = SyncHealthMonitor()
+    private var lastSuccessfulSync: Date?
+    private let criticalDataThreshold: TimeInterval = 86400 // 24 hours
+    
     init() {
         privateContainer = CKContainer.default()
         publicContainer = CKContainer(identifier: "iCloud.com.kaisight.public")
         sharedContainer = CKContainer(identifier: "iCloud.com.kaisight.shared")
         
-        setupCloudSync()
+        setupEnhancedCloudSync()
     }
     
     // MARK: - Setup
     
-    private func setupCloudSync() {
+    private func setupEnhancedCloudSync() {
         setupEncryption()
+        setupNetworkMonitoring()
+        setupSyncHealthMonitoring()
         checkCloudKitAvailability()
         setupSubscriptions()
         loadPendingChanges()
+        initializeOfflineQueue()
         startPeriodicSync()
         
-        Config.debugLog("Enhanced cloud sync manager initialized")
+        Config.debugLog("Enhanced cloud sync manager initialized with robust offline support")
     }
     
     private func setupEncryption() {
@@ -148,34 +160,23 @@ class EnhancedCloudSyncManager: ObservableObject {
     // MARK: - Core Sync Operations
     
     func syncData<T: SyncableData>(_ data: T, to container: SyncContainer = .private) async throws {
-        guard syncStatus == .available else {
-            throw SyncError.unavailable
-        }
-        
-        syncStatus = .syncing
-        
-        do {
-            // Encrypt data if enabled
-            let processedData = try await processDataForSync(data)
-            
-            // Create CloudKit record
-            let record = try createCloudKitRecord(from: processedData, container: container)
-            
-            // Save to CloudKit
-            let savedRecord = try await saveRecord(record, to: container)
-            
-            // Update metadata
-            updateSyncMetadata(for: data.id, record: savedRecord)
-            
-            syncStatus = .available
-            lastSyncDate = Date()
-            
-        } catch {
-            syncStatus = .error(error.localizedDescription)
-            
-            // Store for offline sync
-            await storeForOfflineSync(data, operation: .create)
-            throw error
+        // Check if we're online and CloudKit is available
+        if networkMonitor.isConnected && syncStatus == .available {
+            do {
+                try await performOnlineSync(data, to: container)
+                
+                // Mark as successful sync
+                lastSuccessfulSync = Date()
+                syncHealthMonitor.recordSuccessfulOperation()
+                
+            } catch {
+                // Handle sync failure
+                try await handleSyncFailure(data: data, operation: .create, error: error)
+                throw error
+            }
+        } else {
+            // Offline - queue for later sync
+            try await queueForOfflineSync(data: data, operation: .create, container: container)
         }
     }
     
@@ -709,338 +710,570 @@ class EnhancedCloudSyncManager: ObservableObject {
         
         return summary
     }
-}
-
-// MARK: - Data Models and Protocols
-
-protocol SyncableData: Codable, Identifiable where ID == UUID {
-    var id: UUID { get }
-    var lastModified: Date { get }
-}
-
-struct SyncableChange: Codable {
-    let id: UUID
-    let dataId: UUID
-    let operation: SyncOperation
-    let data: any SyncableData
-    let timestamp: Date
-    var retryCount: Int
     
-    private enum CodingKeys: String, CodingKey {
-        case id, dataId, operation, timestamp, retryCount
+    // MARK: - Enhanced Sync Operations with Fallback
+    
+    private func performOnlineSync<T: SyncableData>(_ data: T, to container: SyncContainer) async throws {
+        syncStatus = .syncing
+        
+        // Encrypt data if enabled
+        let processedData = try await processDataForSync(data)
+        
+        // Create CloudKit record
+        let record = try createCloudKitRecord(from: processedData, container: container)
+        
+        // Save to CloudKit with retry logic
+        let savedRecord = try await saveRecordWithRetry(record, to: container)
+        
+        // Update metadata
+        updateSyncMetadata(for: data.id, record: savedRecord)
+        
+        syncStatus = .available
+        lastSyncDate = Date()
     }
-}
-
-struct SyncMetadata {
-    let dataId: UUID
-    let recordID: CKRecord.ID
-    let lastModified: Date
-    let etag: String?
-}
-
-struct DataConflict {
-    let id: UUID
-    let dataId: UUID
-    let localData: (any SyncableData)?
-    let remoteData: (any SyncableData)?
-    let description: String
-}
-
-struct ConflictResolution {
-    let conflict: DataConflict
-    let strategy: ConflictStrategy
-    let localData: (any SyncableData)?
-    let remoteData: (any SyncableData)?
-    let mergedData: (any SyncableData)?
-}
-
-struct CloudSyncExport: Codable {
-    let spatialAnchors: [SpatialAnchor]
-    let faceIdentities: [FaceIdentity]
-    let episodicMemories: [EpisodicMemory]
-    let exportDate: Date
-    let encryptionEnabled: Bool
-}
-
-// MARK: - Enums
-
-enum SyncStatus: Equatable {
-    case idle
-    case available
-    case syncing
-    case paused
-    case offline
-    case noAccount
-    case unavailable
-    case error(String)
     
-    var description: String {
-        switch self {
-        case .idle: return "Idle"
-        case .available: return "Available"
-        case .syncing: return "Syncing"
-        case .paused: return "Paused"
-        case .offline: return "Offline"
-        case .noAccount: return "No iCloud Account"
-        case .unavailable: return "Unavailable"
-        case .error(let message): return "Error: \(message)"
+    private func saveRecordWithRetry(_ record: CKRecord, to container: SyncContainer, retryCount: Int = 0) async throws -> CKRecord {
+        let maxRetries = 3
+        
+        do {
+            return try await saveRecord(record, to: container)
+        } catch let error as CKError {
+            
+            // Handle specific CloudKit errors
+            switch error.code {
+            case .serverRecordChanged:
+                // Handle conflicts
+                if let resolvedRecord = try await resolveServerConflict(record: record, error: error) {
+                    return try await saveRecord(resolvedRecord, to: container)
+                } else {
+                    throw error
+                }
+                
+            case .networkUnavailable, .networkFailure:
+                if retryCount < maxRetries {
+                    // Exponential backoff
+                    let delay = pow(2.0, Double(retryCount))
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    return try await saveRecordWithRetry(record, to: container, retryCount: retryCount + 1)
+                } else {
+                    throw error
+                }
+                
+            case .quotaExceeded:
+                // Handle quota exceeded
+                try await handleQuotaExceeded()
+                throw error
+                
+            case .serviceUnavailable:
+                if retryCount < maxRetries {
+                    let delay = pow(3.0, Double(retryCount)) // Longer delay for service issues
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    return try await saveRecordWithRetry(record, to: container, retryCount: retryCount + 1)
+                } else {
+                    throw error
+                }
+                
+            default:
+                throw error
+            }
         }
     }
-}
-
-enum SyncContainer {
-    case private
-    case public
-    case shared
-}
-
-enum SyncOperation: String, Codable {
-    case create = "create"
-    case update = "update"
-    case delete = "delete"
-}
-
-enum ConflictStrategy {
-    case useLocal
-    case useRemote
-    case merge
-    case userChoice
-}
-
-enum SyncError: Error {
-    case unavailable
-    case encryptionFailed
-    case decryptionFailed
-    case networkError
-    case quotaExceeded
-    case unauthorized
-}
-
-// MARK: - Supporting Classes
-
-class DataEncryptionManager {
-    private var encryptionKey: SymmetricKey?
     
-    func initializeKeys(completion: @escaping (Bool) -> Void) {
-        // Generate or load encryption key from keychain
-        if let keyData = KeychainManager.shared.getEncryptionKey() {
-            encryptionKey = SymmetricKey(data: keyData)
-            completion(true)
-        } else {
-            // Generate new key
-            let newKey = SymmetricKey(size: .bits256)
-            let keyData = newKey.withUnsafeBytes { Data($0) }
+    private func resolveServerConflict(record: CKRecord, error: CKError) async throws -> CKRecord? {
+        guard let serverRecord = error.userInfo[CKRecordChangedErrorServerRecordKey] as? CKRecord else {
+            return nil
+        }
+        
+        // Get the ancestor record if available
+        let ancestorRecord = error.userInfo[CKRecordChangedErrorAncestorRecordKey] as? CKRecord
+        
+        // Use conflict resolver to handle the conflict
+        let resolution = await conflictResolver.resolveCloudKitConflict(
+            clientRecord: record,
+            serverRecord: serverRecord,
+            ancestorRecord: ancestorRecord
+        )
+        
+        switch resolution.strategy {
+        case .useClient:
+            // Force overwrite server record
+            var updatedRecord = record
+            updatedRecord.recordChangeTag = serverRecord.recordChangeTag
+            return updatedRecord
             
-            if KeychainManager.shared.saveEncryptionKey(keyData) {
-                encryptionKey = newKey
+        case .useServer:
+            // Accept server record
+            return serverRecord
+            
+        case .merge:
+            // Merge records
+            return try await mergeRecords(client: record, server: serverRecord, ancestor: ancestorRecord)
+            
+        case .userChoice:
+            // Present conflict to user
+            DispatchQueue.main.async {
+                self.conflictCount += 1
+            }
+            return nil
+        }
+    }
+    
+    private func mergeRecords(client: CKRecord, server: CKRecord, ancestor: CKRecord?) async throws -> CKRecord {
+        // Implement intelligent record merging
+        let mergedRecord = server.copy() as! CKRecord
+        
+        // Merge non-conflicting fields from client
+        for key in client.allKeys() {
+            if key.hasPrefix("encrypted_") || key == "lastModified" {
+                // Prefer more recent timestamp
+                if let clientDate = client[key] as? Date,
+                   let serverDate = server[key] as? Date,
+                   clientDate > serverDate {
+                    mergedRecord[key] = client[key]
+                }
+            }
+        }
+        
+        return mergedRecord
+    }
+    
+    // MARK: - Offline Operation Queue
+    
+    private func queueForOfflineSync<T: SyncableData>(data: T, operation: SyncOperation, container: SyncContainer) async throws {
+        let queuedOperation = QueuedOperation(
+            id: UUID(),
+            data: data,
+            operation: operation,
+            container: container,
+            timestamp: Date(),
+            retryCount: 0,
+            priority: determinePriority(for: data)
+        )
+        
+        offlineQueue.enqueue(queuedOperation)
+        
+        // Notify user if appropriate
+        if queuedOperation.priority == .high {
+            await notifyUserOfOfflineOperation(queuedOperation)
+        }
+    }
+    
+    private func determinePriority<T: SyncableData>(for data: T) -> OperationPriority {
+        // Determine priority based on data type and recency
+        switch String(describing: type(of: data)) {
+        case "SpatialAnchor":
+            return .high
+        case "FaceIdentity":
+            return .medium
+        default:
+            return .low
+        }
+    }
+    
+    private func notifyUserOfOfflineOperation(_ operation: QueuedOperation) async {
+        if operation.priority == .high {
+            // Only notify for high-priority operations to avoid spam
+            DispatchQueue.main.async {
+                // In a real app, this would show a subtle notification
+                Config.debugLog("High-priority data queued for sync when connection is restored")
+            }
+        }
+    }
+    
+    // MARK: - Sync Recovery and Health Monitoring
+    
+    func performSyncRecovery() async {
+        syncStatus = .syncing
+        
+        do {
+            // Step 1: Verify CloudKit availability
+            try await verifyCloudKitHealth()
+            
+            // Step 2: Resolve any pending conflicts
+            try await resolvePendingConflicts()
+            
+            // Step 3: Process offline queue
+            try await processOfflineQueue()
+            
+            // Step 4: Perform integrity check
+            try await performDataIntegrityCheck()
+            
+        } catch {
+            // Handle sync recovery failure
+            handleSyncError(error)
+        }
+    }
+    
+    private func verifyCloudKitHealth() async throws {
+        // Implement logic to verify CloudKit health
+        // This is a placeholder and should be replaced with actual implementation
+        throw SyncError.unavailable
+    }
+    
+    private func resolvePendingConflicts() async throws {
+        // Implement logic to resolve pending conflicts
+        // This is a placeholder and should be replaced with actual implementation
+        throw SyncError.unavailable
+    }
+    
+    private func processOfflineQueue() async throws {
+        // Implement logic to process offline queue
+        // This is a placeholder and should be replaced with actual implementation
+        throw SyncError.unavailable
+    }
+    
+    private func performDataIntegrityCheck() async throws {
+        // Implement logic to perform data integrity check
+        // This is a placeholder and should be replaced with actual implementation
+        throw SyncError.unavailable
+    }
+    
+    // MARK: - Data Models and Protocols
+    
+    protocol SyncableData: Codable, Identifiable where ID == UUID {
+        var id: UUID { get }
+        var lastModified: Date { get }
+    }
+    
+    struct SyncableChange: Codable {
+        let id: UUID
+        let dataId: UUID
+        let operation: SyncOperation
+        let data: any SyncableData
+        let timestamp: Date
+        var retryCount: Int
+        
+        private enum CodingKeys: String, CodingKey {
+            case id, dataId, operation, timestamp, retryCount
+        }
+    }
+    
+    struct SyncMetadata {
+        let dataId: UUID
+        let recordID: CKRecord.ID
+        let lastModified: Date
+        let etag: String?
+    }
+    
+    struct DataConflict {
+        let id: UUID
+        let dataId: UUID
+        let localData: (any SyncableData)?
+        let remoteData: (any SyncableData)?
+        let description: String
+    }
+    
+    struct ConflictResolution {
+        let conflict: DataConflict
+        let strategy: ConflictStrategy
+        let localData: (any SyncableData)?
+        let remoteData: (any SyncableData)?
+        let mergedData: (any SyncableData)?
+    }
+    
+    struct CloudSyncExport: Codable {
+        let spatialAnchors: [SpatialAnchor]
+        let faceIdentities: [FaceIdentity]
+        let episodicMemories: [EpisodicMemory]
+        let exportDate: Date
+        let encryptionEnabled: Bool
+    }
+    
+    // MARK: - Enums
+    
+    enum SyncStatus: Equatable {
+        case idle
+        case available
+        case syncing
+        case paused
+        case offline
+        case noAccount
+        case unavailable
+        case error(String)
+        
+        var description: String {
+            switch self {
+            case .idle: return "Idle"
+            case .available: return "Available"
+            case .syncing: return "Syncing"
+            case .paused: return "Paused"
+            case .offline: return "Offline"
+            case .noAccount: return "No iCloud Account"
+            case .unavailable: return "Unavailable"
+            case .error(let message): return "Error: \(message)"
+            }
+        }
+    }
+    
+    enum SyncContainer {
+        case private
+        case public
+        case shared
+    }
+    
+    enum SyncOperation: String, Codable {
+        case create = "create"
+        case update = "update"
+        case delete = "delete"
+    }
+    
+    enum ConflictStrategy {
+        case useLocal
+        case useRemote
+        case merge
+        case userChoice
+    }
+    
+    enum SyncError: Error {
+        case unavailable
+        case encryptionFailed
+        case decryptionFailed
+        case networkError
+        case quotaExceeded
+        case unauthorized
+    }
+    
+    // MARK: - Supporting Classes
+    
+    class DataEncryptionManager {
+        private var encryptionKey: SymmetricKey?
+        
+        func initializeKeys(completion: @escaping (Bool) -> Void) {
+            // Generate or load encryption key from keychain
+            if let keyData = KeychainManager.shared.getEncryptionKey() {
+                encryptionKey = SymmetricKey(data: keyData)
                 completion(true)
             } else {
-                completion(false)
+                // Generate new key
+                let newKey = SymmetricKey(size: .bits256)
+                let keyData = newKey.withUnsafeBytes { Data($0) }
+                
+                if KeychainManager.shared.saveEncryptionKey(keyData) {
+                    encryptionKey = newKey
+                    completion(true)
+                } else {
+                    completion(false)
+                }
             }
         }
-    }
-    
-    func encrypt<T: SyncableData>(_ data: T) async throws -> SyncableData {
-        guard let key = encryptionKey else {
-            throw SyncError.encryptionFailed
-        }
         
-        let jsonData = try JSONEncoder().encode(data)
-        let encryptedData = try AES.GCM.seal(jsonData, using: key)
-        
-        return EncryptedSyncData(
-            id: data.id,
-            lastModified: data.lastModified,
-            encryptedData: encryptedData.combined!,
-            dataType: String(describing: type(of: data))
-        )
-    }
-    
-    func decrypt<T: SyncableData>(_ record: CKRecord, as type: T.Type) async throws -> T? {
-        guard let key = encryptionKey else {
-            throw SyncError.decryptionFailed
-        }
-        
-        // Extract encrypted data from CloudKit record
-        guard let encryptedDataField = record["encryptedData"] as? Data else {
-            throw SyncError.decryptionFailed
-        }
-        
-        let sealedBox = try AES.GCM.SealedBox(combined: encryptedDataField)
-        let decryptedData = try AES.GCM.open(sealedBox, using: key)
-        
-        return try JSONDecoder().decode(type, from: decryptedData)
-    }
-}
-
-struct EncryptedSyncData: SyncableData {
-    let id: UUID
-    let lastModified: Date
-    let encryptedData: Data
-    let dataType: String
-}
-
-class KeychainManager {
-    static let shared = KeychainManager()
-    
-    private let service = "com.kaisight.encryption"
-    private let keyAccount = "master-key"
-    
-    func saveEncryptionKey(_ keyData: Data) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: keyAccount,
-            kSecValueData as String: keyData
-        ]
-        
-        SecItemDelete(query as CFDictionary)
-        let status = SecItemAdd(query as CFDictionary, nil)
-        
-        return status == errSecSuccess
-    }
-    
-    func getEncryptionKey() -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: keyAccount,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        
-        return status == errSecSuccess ? result as? Data : nil
-    }
-}
-
-class ConflictResolver {
-    func resolve(_ conflict: DataConflict) async -> ConflictResolution {
-        // Automatic conflict resolution strategies
-        
-        // Strategy 1: Most recent wins
-        if let localData = conflict.localData,
-           let remoteData = conflict.remoteData {
+        func encrypt<T: SyncableData>(_ data: T) async throws -> SyncableData {
+            guard let key = encryptionKey else {
+                throw SyncError.encryptionFailed
+            }
             
-            if localData.lastModified > remoteData.lastModified {
-                return ConflictResolution(
-                    conflict: conflict,
-                    strategy: .useLocal,
-                    localData: localData,
-                    remoteData: remoteData,
-                    mergedData: nil
-                )
-            } else {
-                return ConflictResolution(
-                    conflict: conflict,
-                    strategy: .useRemote,
-                    localData: localData,
-                    remoteData: remoteData,
-                    mergedData: nil
-                )
+            let jsonData = try JSONEncoder().encode(data)
+            let encryptedData = try AES.GCM.seal(jsonData, using: key)
+            
+            return EncryptedSyncData(
+                id: data.id,
+                lastModified: data.lastModified,
+                encryptedData: encryptedData.combined!,
+                dataType: String(describing: type(of: data))
+            )
+        }
+        
+        func decrypt<T: SyncableData>(_ record: CKRecord, as type: T.Type) async throws -> T? {
+            guard let key = encryptionKey else {
+                throw SyncError.decryptionFailed
+            }
+            
+            // Extract encrypted data from CloudKit record
+            guard let encryptedDataField = record["encryptedData"] as? Data else {
+                throw SyncError.decryptionFailed
+            }
+            
+            let sealedBox = try AES.GCM.SealedBox(combined: encryptedDataField)
+            let decryptedData = try AES.GCM.open(sealedBox, using: key)
+            
+            return try JSONDecoder().decode(type, from: decryptedData)
+        }
+    }
+    
+    struct EncryptedSyncData: SyncableData {
+        let id: UUID
+        let lastModified: Date
+        let encryptedData: Data
+        let dataType: String
+    }
+    
+    class KeychainManager {
+        static let shared = KeychainManager()
+        
+        private let service = "com.kaisight.encryption"
+        private let keyAccount = "master-key"
+        
+        func saveEncryptionKey(_ keyData: Data) -> Bool {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: keyAccount,
+                kSecValueData as String: keyData
+            ]
+            
+            SecItemDelete(query as CFDictionary)
+            let status = SecItemAdd(query as CFDictionary, nil)
+            
+            return status == errSecSuccess
+        }
+        
+        func getEncryptionKey() -> Data? {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: keyAccount,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ]
+            
+            var result: AnyObject?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            
+            return status == errSecSuccess ? result as? Data : nil
+        }
+    }
+    
+    class ConflictResolver {
+        func resolve(_ conflict: DataConflict) async -> ConflictResolution {
+            // Automatic conflict resolution strategies
+            
+            // Strategy 1: Most recent wins
+            if let localData = conflict.localData,
+               let remoteData = conflict.remoteData {
+                
+                if localData.lastModified > remoteData.lastModified {
+                    return ConflictResolution(
+                        conflict: conflict,
+                        strategy: .useLocal,
+                        localData: localData,
+                        remoteData: remoteData,
+                        mergedData: nil
+                    )
+                } else {
+                    return ConflictResolution(
+                        conflict: conflict,
+                        strategy: .useRemote,
+                        localData: localData,
+                        remoteData: remoteData,
+                        mergedData: nil
+                    )
+                }
+            }
+            
+            // Strategy 2: User choice for complex conflicts
+            return ConflictResolution(
+                conflict: conflict,
+                strategy: .userChoice,
+                localData: conflict.localData,
+                remoteData: conflict.remoteData,
+                mergedData: nil
+            )
+        }
+    }
+    
+    class OfflineStorageManager {
+        private let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        
+        func saveData<T: SyncableData>(_ data: [T]) async {
+            let filename = "\(String(describing: T.self)).json"
+            let url = documentsDirectory.appendingPathComponent(filename)
+            
+            do {
+                let jsonData = try JSONEncoder().encode(data)
+                try jsonData.write(to: url)
+            } catch {
+                Config.debugLog("Failed to save offline data: \(error)")
             }
         }
         
-        // Strategy 2: User choice for complex conflicts
-        return ConflictResolution(
-            conflict: conflict,
-            strategy: .userChoice,
-            localData: conflict.localData,
-            remoteData: conflict.remoteData,
-            mergedData: nil
-        )
-    }
-}
-
-class OfflineStorageManager {
-    private let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-    
-    func saveData<T: SyncableData>(_ data: [T]) async {
-        let filename = "\(String(describing: T.self)).json"
-        let url = documentsDirectory.appendingPathComponent(filename)
-        
-        do {
-            let jsonData = try JSONEncoder().encode(data)
-            try jsonData.write(to: url)
-        } catch {
-            Config.debugLog("Failed to save offline data: \(error)")
+        func loadData<T: SyncableData>(ofType type: T.Type) async -> [T] {
+            let filename = "\(String(describing: type)).json"
+            let url = documentsDirectory.appendingPathComponent(filename)
+            
+            do {
+                let jsonData = try Data(contentsOf: url)
+                return try JSONDecoder().decode([T].self, from: jsonData)
+            } catch {
+                Config.debugLog("Failed to load offline data: \(error)")
+                return []
+            }
         }
-    }
-    
-    func loadData<T: SyncableData>(ofType type: T.Type) async -> [T] {
-        let filename = "\(String(describing: type)).json"
-        let url = documentsDirectory.appendingPathComponent(filename)
         
-        do {
-            let jsonData = try Data(contentsOf: url)
-            return try JSONDecoder().decode([T].self, from: jsonData)
-        } catch {
-            Config.debugLog("Failed to load offline data: \(error)")
+        func savePendingChange(_ change: SyncableChange) async {
+            // Save pending changes for offline sync
+        }
+        
+        func loadPendingChanges() async -> [SyncableChange] {
+            // Load pending changes
             return []
         }
-    }
-    
-    func savePendingChange(_ change: SyncableChange) async {
-        // Save pending changes for offline sync
-    }
-    
-    func loadPendingChanges() async -> [SyncableChange] {
-        // Load pending changes
-        return []
-    }
-    
-    func removePendingChanges(_ changeIds: [UUID]) async {
-        // Remove completed changes
-    }
-    
-    func updateLocalData<T: SyncableData>(_ data: T) async {
-        // Update local data with remote changes
-    }
-}
-
-class RetryManager {
-    private var retryAttempts: [String: Int] = [:]
-    
-    func scheduleRetry(operation: @escaping () -> Void) {
-        // Exponential backoff retry
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-            operation()
+        
+        func removePendingChanges(_ changeIds: [UUID]) async {
+            // Remove completed changes
+        }
+        
+        func updateLocalData<T: SyncableData>(_ data: T) async {
+            // Update local data with remote changes
         }
     }
-}
-
-class CloudKitEncoder {
-    func encode<T: SyncableData>(_ data: T, to record: CKRecord) throws {
-        let jsonData = try JSONEncoder().encode(data)
-        record["data"] = jsonData as CKRecordValue
-        record["lastModified"] = data.lastModified as CKRecordValue
+    
+    class RetryManager {
+        private var retryAttempts: [String: Int] = [:]
+        
+        func scheduleRetry(operation: @escaping () -> Void) {
+            // Exponential backoff retry
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                operation()
+            }
+        }
     }
-}
-
-// MARK: - Extensions
-
-extension SpatialAnchor: SyncableData {
-    var lastModified: Date { timestamp }
-}
-
-extension FaceIdentity: SyncableData {
-    var lastModified: Date { lastSeen }
-}
-
-extension CustomObjectIdentity: SyncableData {
-    var lastModified: Date { lastSeen }
-}
-
-extension EpisodicMemory: SyncableData {
-    var lastModified: Date { timestamp }
-}
-
-extension SemanticMemory: SyncableData {
-    var lastModified: Date { timestamp }
-}
-
-extension LocationMemory: SyncableData {
-    var lastModified: Date { timestamp }
+    
+    class CloudKitEncoder {
+        func encode<T: SyncableData>(_ data: T, to record: CKRecord) throws {
+            let jsonData = try JSONEncoder().encode(data)
+            record["data"] = jsonData as CKRecordValue
+            record["lastModified"] = data.lastModified as CKRecordValue
+        }
+    }
+    
+    // MARK: - Extensions
+    
+    extension SpatialAnchor: SyncableData {
+        var lastModified: Date { timestamp }
+    }
+    
+    extension FaceIdentity: SyncableData {
+        var lastModified: Date { lastSeen }
+    }
+    
+    extension CustomObjectIdentity: SyncableData {
+        var lastModified: Date { lastSeen }
+    }
+    
+    extension EpisodicMemory: SyncableData {
+        var lastModified: Date { timestamp }
+    }
+    
+    extension SemanticMemory: SyncableData {
+        var lastModified: Date { timestamp }
+    }
+    
+    extension LocationMemory: SyncableData {
+        var lastModified: Date { timestamp }
+    }
+    
+    private func setupNetworkMonitoring() {
+        networkMonitor.delegate = self
+        networkMonitor.startMonitoring()
+    }
+    
+    private func setupSyncHealthMonitoring() {
+        syncHealthMonitor.delegate = self
+        syncHealthMonitor.startMonitoring()
+    }
+    
+    private func initializeOfflineQueue() {
+        offlineQueue.delegate = self
+        offlineQueue.loadQueuedOperations()
+    }
 } 

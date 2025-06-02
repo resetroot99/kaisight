@@ -30,6 +30,12 @@ class StreamingGPTManager: ObservableObject {
     private let speechOutput = SpeechOutput()
     private let cameraManager = CameraManager()
     
+    // Memory-Aware Context Management
+    private var sceneMemory: [SceneMemory] = []
+    private let maxSceneMemory = 5
+    private var lastSceneHash: String?
+    private var changeDetector = SceneChangeDetector()
+    
     init() {
         self.apiKey = Config.openAIAPIKey
         setupStreamingManager()
@@ -210,37 +216,121 @@ class StreamingGPTManager: ObservableObject {
     }
     
     private func generateStreamingNarration(for image: UIImage) {
-        let prompt = createNarrationPrompt(for: image)
+        let currentSceneHash = generateImageHash(image)
+        
+        // Detect changes since last scene
+        let changes = changeDetector.detectChanges(
+            currentImage: image,
+            previousScenes: sceneMemory,
+            currentHash: currentSceneHash
+        )
+        
+        let prompt = createMemoryAwareNarrationPrompt(
+            image: image,
+            detectedChanges: changes,
+            sceneHistory: Array(sceneMemory.suffix(3))
+        )
         
         streamResponse(to: prompt) { [weak self] partialContent in
-            // Could provide real-time audio feedback here
-            // For now, just accumulate the response
+            // Real-time partial narration
         } completion: { [weak self] fullResponse in
-            self?.deliverNarration(fullResponse)
+            self?.processNarrationResponse(fullResponse, image: image, changes: changes)
         }
     }
     
-    private func createNarrationPrompt(for image: UIImage) -> String {
-        let base64Image = image.base64EncodedString()
-        
+    private func createMemoryAwareNarrationPrompt(
+        image: UIImage,
+        detectedChanges: SceneChanges,
+        sceneHistory: [SceneMemory]
+    ) -> String {
         var prompt = """
-        Analyze this scene and provide a brief, clear description for a visually impaired user. Focus on:
-        - Important objects and their locations
-        - Potential navigation hazards or aids
-        - Changes from previous descriptions
-        - Spatial relationships (left, right, ahead, distance)
+        You are KaiSight providing real-time environmental narration. Focus on what's NEW or CHANGED.
         
-        Keep the description under 30 words for quick audio delivery.
+        PRIORITY RULES:
+        1. NEW objects/people/changes get immediate attention
+        2. MOVED objects get brief mention
+        3. UNCHANGED familiar objects - mention only if user asks
+        4. Keep narration under 15 words for real-time delivery
+        5. Use spatial language (left, right, ahead, distance)
         
-        Image: \(base64Image)
+        Current scene analysis:
         """
         
-        // Add context from recent narrations
-        if let recentNarration = narrativeHistory.last {
-            prompt += "\n\nPrevious description: \(recentNarration.content)"
+        // Add change detection results
+        if !detectedChanges.newObjects.isEmpty {
+            prompt += "\nNEW objects detected: \(detectedChanges.newObjects.joined(separator: ", "))"
+        }
+        
+        if !detectedChanges.movedObjects.isEmpty {
+            prompt += "\nMOVED objects: \(detectedChanges.movedObjects.joined(separator: ", "))"
+        }
+        
+        if !detectedChanges.removedObjects.isEmpty {
+            prompt += "\nREMOVED objects: \(detectedChanges.removedObjects.joined(separator: ", "))"
+        }
+        
+        // Add recent scene context (abbreviated)
+        if !sceneHistory.isEmpty {
+            prompt += "\n\nRecent scene memory (don't repeat unless changed):"
+            for (index, scene) in sceneHistory.enumerated() {
+                let timeAgo = Int(Date().timeIntervalSince(scene.timestamp))
+                prompt += "\n\(timeAgo)s ago: \(scene.description.prefix(30))..."
+            }
+        }
+        
+        prompt += "\n\nImage: \(image.base64EncodedString())"
+        
+        // Specific instructions based on change level
+        if detectedChanges.significantChange {
+            prompt += "\n\nSIGNIFICANT CHANGE detected. Provide clear, immediate narration."
+        } else if detectedChanges.minorChange {
+            prompt += "\n\nMinor change detected. Brief update only."
+        } else {
+            prompt += "\n\nNo major changes. Only speak if something important requires attention."
         }
         
         return prompt
+    }
+    
+    private func processNarrationResponse(_ response: String, image: UIImage, changes: SceneChanges) {
+        // Only deliver narration if there are meaningful changes or user interaction
+        let shouldNarrate = changes.significantChange || 
+                           changes.newObjects.count > 0 || 
+                           Date().timeIntervalSince(lastNarrationTime ?? Date.distantPast) > 30.0
+        
+        if shouldNarrate && !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Create scene memory entry
+            let sceneMemory = SceneMemory(
+                id: UUID(),
+                description: response,
+                timestamp: Date(),
+                imageHash: generateImageHash(image),
+                keyObjects: changes.allObjects,
+                changesSinceLastScene: changes.newObjects + changes.movedObjects
+            )
+            
+            addToSceneMemory(sceneMemory)
+            deliverNarration(response)
+        }
+    }
+    
+    private func addToSceneMemory(_ memory: SceneMemory) {
+        sceneMemory.append(memory)
+        
+        // Maintain memory limit
+        if sceneMemory.count > maxSceneMemory {
+            sceneMemory.removeFirst()
+        }
+        
+        lastSceneHash = memory.imageHash
+    }
+    
+    private func generateImageHash(_ image: UIImage) -> String {
+        guard let imageData = image.jpegData(compressionQuality: 0.3) else {
+            return UUID().uuidString
+        }
+        
+        return String(imageData.hashValue)
     }
     
     private func deliverNarration(_ narration: String) {
@@ -358,6 +448,33 @@ class StreamingGPTManager: ObservableObject {
         } else {
             return "Real-time narration inactive"
         }
+    }
+    
+    // MARK: - Enhanced Context Intelligence
+    
+    func getSceneMemorySummary() -> String {
+        guard !sceneMemory.isEmpty else { return "No scene memory available" }
+        
+        let recentScenes = sceneMemory.suffix(3)
+        var summary = "Recent scenes: "
+        
+        for scene in recentScenes {
+            let timeAgo = Int(Date().timeIntervalSince(scene.timestamp))
+            summary += "\(timeAgo)s ago: \(scene.keyObjects.joined(separator: ", ")). "
+        }
+        
+        return summary
+    }
+    
+    func clearSceneMemory() {
+        sceneMemory.removeAll()
+        lastSceneHash = nil
+        changeDetector = SceneChangeDetector()
+    }
+    
+    func hasSignificantSceneChanges() -> Bool {
+        guard let lastScene = sceneMemory.last else { return true }
+        return Date().timeIntervalSince(lastScene.timestamp) > 5.0
     }
 }
 
@@ -493,4 +610,114 @@ extension CameraManager {
         // Implementation depends on the existing CameraManager setup
         return nil // Placeholder
     }
+}
+
+// MARK: - Scene Change Detection
+
+class SceneChangeDetector {
+    private var lastObjects: [DetectedObject] = []
+    private var objectTracker = ObjectTracker()
+    
+    func detectChanges(
+        currentImage: UIImage,
+        previousScenes: [SceneMemory],
+        currentHash: String
+    ) -> SceneChanges {
+        // Detect objects in current scene
+        let currentObjects = detectObjects(in: currentImage)
+        let previousObjects = lastObjects
+        
+        // Compare with previous scene
+        let newObjects = findNewObjects(current: currentObjects, previous: previousObjects)
+        let removedObjects = findRemovedObjects(current: currentObjects, previous: previousObjects)
+        let movedObjects = findMovedObjects(current: currentObjects, previous: previousObjects)
+        
+        // Determine significance
+        let significantChange = newObjects.count > 0 || removedObjects.count > 0 || movedObjects.count > 2
+        let minorChange = movedObjects.count > 0 && movedObjects.count <= 2
+        
+        // Update tracking
+        lastObjects = currentObjects
+        
+        return SceneChanges(
+            newObjects: newObjects.map { $0.label },
+            removedObjects: removedObjects.map { $0.label },
+            movedObjects: movedObjects.map { $0.label },
+            allObjects: currentObjects.map { $0.label },
+            significantChange: significantChange,
+            minorChange: minorChange
+        )
+    }
+    
+    private func detectObjects(in image: UIImage) -> [DetectedObject] {
+        // Use Vision framework for object detection
+        // This is a simplified implementation
+        return []
+    }
+    
+    private func findNewObjects(current: [DetectedObject], previous: [DetectedObject]) -> [DetectedObject] {
+        return current.filter { currentObj in
+            !previous.contains { prevObj in
+                currentObj.label == prevObj.label && 
+                distance(currentObj.boundingBox.center, prevObj.boundingBox.center) < 0.1
+            }
+        }
+    }
+    
+    private func findRemovedObjects(current: [DetectedObject], previous: [DetectedObject]) -> [DetectedObject] {
+        return previous.filter { prevObj in
+            !current.contains { currentObj in
+                prevObj.label == currentObj.label &&
+                distance(prevObj.boundingBox.center, currentObj.boundingBox.center) < 0.1
+            }
+        }
+    }
+    
+    private func findMovedObjects(current: [DetectedObject], previous: [DetectedObject]) -> [DetectedObject] {
+        return current.filter { currentObj in
+            previous.contains { prevObj in
+                currentObj.label == prevObj.label &&
+                distance(currentObj.boundingBox.center, prevObj.boundingBox.center) > 0.1 &&
+                distance(currentObj.boundingBox.center, prevObj.boundingBox.center) < 0.5
+            }
+        }
+    }
+    
+    private func distance(_ point1: CGPoint, _ point2: CGPoint) -> Double {
+        let dx = point1.x - point2.x
+        let dy = point1.y - point2.y
+        return sqrt(dx * dx + dy * dy)
+    }
+}
+
+struct SceneChanges {
+    let newObjects: [String]
+    let removedObjects: [String]
+    let movedObjects: [String]
+    let allObjects: [String]
+    let significantChange: Bool
+    let minorChange: Bool
+}
+
+class ObjectTracker {
+    private var trackedObjects: [String: TrackedObjectState] = [:]
+    
+    func updateTracking(_ objects: [DetectedObject]) {
+        // Update object positions and states
+    }
+}
+
+struct TrackedObjectState {
+    let lastPosition: CGPoint
+    let lastSeen: Date
+    let stability: Float
+}
+
+struct SceneMemory {
+    let id: UUID
+    let description: String
+    let timestamp: Date
+    let imageHash: String
+    let keyObjects: [String]
+    let changesSinceLastScene: [String]
 } 
