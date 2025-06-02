@@ -46,7 +46,6 @@ class VoiceAgentLoop: NSObject, ObservableObject {
             try audioSession.setCategory(.playAndRecord, mode: .measurement, options: .duckOthers)
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
-            print("❌ Audio session setup failed: \(error)")
         }
     }
     
@@ -55,11 +54,9 @@ class VoiceAgentLoop: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 switch status {
                 case .authorized:
-                    Config.debugLog("Speech recognition authorized")
+                    ProductionConfig.log("Speech recognition authorized")
                 case .denied:
-                    print("❌ Speech recognition denied")
                 case .restricted, .notDetermined:
-                    print("⚠️ Speech recognition not available")
                 @unknown default:
                     break
                 }
@@ -162,7 +159,6 @@ class VoiceAgentLoop: NSObject, ObservableObject {
     
     private func startAudioRecognition(completion: @escaping (String) -> Void) {
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
-            print("❌ Speech recognition not available")
             return
         }
         
@@ -182,7 +178,6 @@ class VoiceAgentLoop: NSObject, ObservableObject {
         do {
             try audioEngine.start()
         } catch {
-            print("❌ Audio engine start failed: \(error)")
             return
         }
         

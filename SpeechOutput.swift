@@ -22,7 +22,6 @@ class SpeechOutput: NSObject, ObservableObject {
             try AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
-            print("Failed to setup audio session for speech: \(error)")
         }
     }
     

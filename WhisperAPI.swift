@@ -14,13 +14,11 @@ class WhisperAPI {
     
     func transcribe(audioFileURL: URL, completion: @escaping (String?) -> Void) {
         guard !OPENAI_API_KEY.isEmpty else {
-            print("OpenAI API key not found")
             completion(nil)
             return
         }
         
         guard FileManager.default.fileExists(atPath: audioFileURL.path) else {
-            print("Audio file not found at: \(audioFileURL.path)")
             completion(nil)
             return
         }
@@ -52,7 +50,6 @@ class WhisperAPI {
                 self.transcribe(audioFileURL: audioFile, completion: completion)
             }
         } catch {
-            print("Failed to setup recording: \(error)")
             completion(nil)
         }
     }
@@ -80,14 +77,12 @@ class WhisperAPI {
 
             request.httpBody = data
         } catch {
-            print("Failed to read audio file: \(error)")
             completion(nil)
             return
         }
 
         URLSession.shared.dataTask(with: request) { [weak self] responseData, response, error in
             if let error = error {
-                print("Network error: \(error)")
                 if retryCount < self?.maxRetries ?? 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                         self?.sendToWhisper(fileURL: fileURL, retryCount: retryCount + 1, completion: completion)
@@ -99,7 +94,6 @@ class WhisperAPI {
             }
             
             if let httpResponse = response as? HTTPURLResponse {
-                print("Whisper API Status Code: \(httpResponse.statusCode)")
                 
                 if httpResponse.statusCode == 429 { // Rate limited
                     if retryCount < self?.maxRetries ?? 0 {
@@ -124,11 +118,9 @@ class WhisperAPI {
                     let cleanedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     completion(cleanedText.isEmpty ? nil : cleanedText)
                 } else {
-                    print("Invalid response format")
                     completion(nil)
                 }
             } catch {
-                print("JSON parsing error: \(error)")
                 completion(nil)
             }
             

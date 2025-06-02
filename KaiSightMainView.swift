@@ -954,7 +954,6 @@ struct KaiSightMainView: View {
     func announceEcosystemStatus() {
         let status = getCompleteEcosystemStatus()
         speechOutput.speak("Complete ecosystem status available. Check console for details.")
-        print(status)
     }
 }
 

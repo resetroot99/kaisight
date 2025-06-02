@@ -57,7 +57,7 @@ class KaiSightHealthCore: ObservableObject {
             self.speechOutput.speak("KaiSight health monitoring system ready")
         }
         
-        Config.debugLog("KaiSight Health Core initialized")
+        ProductionConfig.log("KaiSight Health Core initialized")
     }
     
     private func setupDelegates() {
@@ -78,7 +78,7 @@ class KaiSightHealthCore: ObservableObject {
         // Set up emergency protocol delegate
         emergencyProtocol.delegate = self
         
-        Config.debugLog("All system delegates configured")
+        ProductionConfig.log("All system delegates configured")
     }
     
     private func processGlobalVoiceCommand(_ command: String) {
@@ -240,7 +240,7 @@ class KaiSightHealthCore: ObservableObject {
     // MARK: - Drop Event Handling
     
     func handleDropEvent(_ dropEvent: DropEvent) {
-        Config.debugLog("Processing drop event: Impact \(dropEvent.impactForce)G")
+        ProductionConfig.log("Processing drop event: Impact \(dropEvent.impactForce)G")
         
         // Update system status
         DispatchQueue.main.async {
@@ -302,7 +302,6 @@ class Config {
     static func debugLog(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
         if debugMode {
             let filename = (file as NSString).lastPathComponent
-            print("🩺 KaiSight[\(filename):\(line)] \(function): \(message)")
         }
     }
 }
@@ -386,7 +385,7 @@ class SpeechOutput: NSObject, ObservableObject {
         }
         
         synthesizer.speak(utterance)
-        Config.debugLog("Speaking: \(request.text) [Priority: \(request.priority)]")
+        ProductionConfig.log("Speaking: \(request.text) [Priority: \(request.priority)]")
     }
 }
 
@@ -768,7 +767,7 @@ class VoiceCommandProcessor {
         for command in commands {
             registeredCommands[command.lowercased()] = category
         }
-        Config.debugLog("Registered \(commands.count) commands for category: \(category)")
+        ProductionConfig.log("Registered \(commands.count) commands for category: \(category)")
     }
     
     func getRegisteredCommands(for category: String) -> [String] {
@@ -977,7 +976,7 @@ extension KaiSightHealthCore {
 extension KaiSightHealthCore {
     func registerAirPodsCommands(_ locator: AirPodsLocator) {
         // Register AirPods-specific voice commands
-        Config.debugLog("AirPods voice commands registered with health core")
+        ProductionConfig.log("AirPods voice commands registered with health core")
         
         // Add AirPods commands to the voice command processor
         let airPodsCommands = [

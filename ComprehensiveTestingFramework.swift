@@ -766,7 +766,6 @@ extension Config {
     
     static func debugLog(_ message: String) {
         if debugMode {
-            print("[DEBUG] \(message)")
         }
     }
 }

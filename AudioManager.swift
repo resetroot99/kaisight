@@ -23,7 +23,6 @@ class AudioManager: NSObject, ObservableObject {
             try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
             try audioSession.setActive(true)
         } catch {
-            print("Failed to setup audio session: \(error)")
         }
     }
     
@@ -65,7 +64,6 @@ class AudioManager: NSObject, ObservableObject {
             }
             
         } catch {
-            print("Failed to start recording: \(error)")
             completion(nil)
         }
     }

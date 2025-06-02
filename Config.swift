@@ -35,7 +35,6 @@ struct Config {
     // MARK: - Debug Messages
     static func debugLog(_ message: String) {
         if enableDebugLogging {
-            print("🔍 BlindAssistant Debug: \(message)")
         }
     }
 }

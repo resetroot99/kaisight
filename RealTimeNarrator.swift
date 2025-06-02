@@ -33,7 +33,6 @@ class RealTimeNarrator: NSObject, ObservableObject {
     
     private func setupCaptureSession() {
         guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            print("❌ No camera available")
             return
         }
         
@@ -57,7 +56,6 @@ class RealTimeNarrator: NSObject, ObservableObject {
             captureSession.sessionPreset = .medium
             
         } catch {
-            print("❌ Camera setup error: \(error)")
         }
     }
     

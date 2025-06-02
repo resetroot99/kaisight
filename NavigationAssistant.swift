@@ -617,7 +617,6 @@ extension NavigationAssistant: CLLocationManagerDelegate {
     }
     
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("Location manager failed with error: \(error)")
     }
     
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
@@ -626,7 +625,6 @@ extension NavigationAssistant: CLLocationManagerDelegate {
             locationManager.startUpdatingLocation()
             locationManager.startUpdatingHeading()
         case .denied, .restricted:
-            print("Location access denied")
         case .notDetermined:
             locationManager.requestWhenInUseAuthorization()
         @unknown default:

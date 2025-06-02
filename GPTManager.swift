@@ -94,7 +94,6 @@ class GPTManager {
         
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             if let error = error {
-                print("Network error: \(error)")
                 if retryCount < self?.maxRetries ?? 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                         self?.sendRequest(prompt: prompt, image: image, retryCount: retryCount + 1, completion: completion)
@@ -106,7 +105,6 @@ class GPTManager {
             }
             
             if let httpResponse = response as? HTTPURLResponse {
-                print("GPT API Status Code: \(httpResponse.statusCode)")
                 
                 if httpResponse.statusCode == 429 { // Rate limited
                     if retryCount < self?.maxRetries ?? 0 {
@@ -137,7 +135,6 @@ class GPTManager {
                     completion("I'm sorry, I couldn't understand the response. Please try again.")
                 }
             } catch {
-                print("JSON parsing error: \(error)")
                 completion("I'm sorry, there was an error processing the response. Please try again.")
             }
         }.resume()

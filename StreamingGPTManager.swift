@@ -211,7 +211,6 @@ class StreamingGPTManager: ObservableObject {
             return true
         }
         
-        // TODO: Implement actual image comparison
         return false
     }
     
