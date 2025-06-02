@@ -5,1129 +5,1040 @@ import Combine
 import UIKit
 
 struct KaiSightMainView: View {
-    // Core Managers
-    @StateObject var cameraManager = CameraManager()
-    @StateObject var audioManager = AudioManager()
-    @StateObject var gptManager = GPTManager()
-    @StateObject var speechOutput = SpeechOutput()
-    @StateObject var objectDetection = ObjectDetectionManager()
-    @StateObject var navigationAssistant = NavigationAssistant()
+    // Core managers (existing)
+    @StateObject private var cameraManager = CameraManager()
+    @StateObject private var audioManager = AudioManager()
+    @StateObject private var gptManager = GPTManager()
+    @StateObject private var speechOutput = SpeechOutput()
+    @StateObject private var objectDetection = ObjectDetectionManager()
+    @StateObject private var navigationAssistant = NavigationAssistant()
+    @StateObject private var realTimeNarrator = RealTimeNarrator()
+    @StateObject private var voiceAgentLoop = VoiceAgentLoop()
+    @StateObject private var familiarRecognition = FamiliarRecognition()
     
-    // Enhanced Features
-    @StateObject var realTimeNarrator = RealTimeNarrator()
-    @StateObject var voiceAgent = VoiceAgentLoop()
-    @StateObject var familiarRecognition = FamiliarRecognition()
+    // Phase 2 managers (existing)
+    @StateObject private var spatialMapping = SpatialMappingManager()
+    @StateObject private var obstacleDetection = ObstacleDetectionManager()
+    @StateObject private var cloudSync = CloudSyncManager()
     
-    // Phase 2 advanced managers
-    @StateObject var spatialMapping = SpatialMappingManager()
-    @StateObject var obstacleDetection = ObstacleDetectionManager()
-    @StateObject var cloudSync = CloudSyncManager()
+    // Phase 3 managers (NEW - Complete Ecosystem)
+    @StateObject private var arOverlayManager = AROverlayManager()
+    @StateObject private var communityManager = CommunityManager()
+    @StateObject private var caregiverDashboard = CaregiverDashboard()
+    @StateObject private var smartHomeManager = SmartHomeManager()
+    @StateObject private var personalizationEngine = PersonalizationEngine()
     
-    // UI State
-    @State private var currentMode: KaiSightMode = .standard
-    @State private var showingSettings = false
-    @State private var showingFamiliarPeople = false
-    @State private var statusMessage = "KaiSight ready"
-    @State private var isProcessing = false
-    
-    // Phase 2 UI state
-    @State private var showSpatialMapping = false
-    @State private var showObstacleDetection = false
-    @State private var showCloudSync = false
-    @State private var spatialMappingActive = false
-    @State private var obstacleDetectionActive = false
+    // Enhanced state management for Phase 3
+    @State private var currentMode: KaiSightMode = .assistant
+    @State private var ecosystemStatus = EcosystemStatus()
+    @State private var adaptiveUI = AdaptiveUIState()
+    @State private var isPhase3Ready = false
     
     var body: some View {
-        NavigationView {
-            GeometryReader { geometry in
-                ZStack {
-                    // Camera preview
-                    CameraPreviewView(session: cameraManager.session)
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
-                        .accessibilityHidden(true)
-                    
-                    // Main overlay
-                    VStack {
-                        // Top status bar with Phase 2 indicators
-                        topStatusBar
-                        
-                        Spacer()
-                        
-                        // Quick actions with Phase 2 features
-                        quickActionsPanel
-                        
-                        Spacer()
-                        
-                        // Main control buttons
-                        mainControlButtons
-                        
-                        // Phase 2 advanced controls
-                        phase2ControlButtons
-                        
-                        Spacer()
-                        
-                        // Bottom status with sync indicator
-                        bottomStatusWithSync
-                    }
-                    .padding()
-                    
-                    // Phase 2 overlay panels
-                    if showSpatialMapping {
-                        spatialMappingPanel
-                    }
-                    
-                    if showObstacleDetection {
-                        obstacleDetectionPanel
-                    }
-                    
-                    if showCloudSync {
-                        cloudSyncPanel
-                    }
-                }
+        ZStack {
+            // Base camera view
+            CameraPreviewView()
+                .ignoresSafeArea()
+            
+            // AR Overlay Layer (Phase 3)
+            if arOverlayManager.isVisionProMode {
+                VisionProAROverlay()
+            } else {
+                StandardAROverlay()
             }
-            .navigationTitle("KaiSight")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                toolbarContent
+            
+            // Adaptive UI Layer
+            AdaptiveInterfaceOverlay()
+            
+            // Community Integration Layer
+            CommunityInteractionOverlay()
+            
+            // Smart Home Control Layer
+            SmartHomeControlOverlay()
+            
+            // Caregiver Monitoring Layer (if applicable)
+            if caregiverDashboard.isOnDuty {
+                CaregiverMonitoringOverlay()
             }
-        }
-        .sheet(isPresented: $showingSettings) {
-            EnhancedSettingsView(
-                speechOutput: speechOutput,
-                realTimeNarrator: realTimeNarrator,
-                voiceAgent: voiceAgent,
-                familiarRecognition: familiarRecognition
-            )
-        }
-        .sheet(isPresented: $showingFamiliarPeople) {
-            FamiliarPeopleView(familiarRecognition: familiarRecognition)
+            
+            // Main Control Interface
+            MainControlInterface()
         }
         .onAppear {
-            setupKaiSight()
+            initializePhase3Ecosystem()
         }
-        .onChange(of: currentMode) { mode in
-            handleModeChange(mode)
+        .onChange(of: personalizationEngine.adaptiveSettings) { settings in
+            adaptInterface(to: settings)
         }
-        .onChange(of: spatialMappingActive) { active in
-            if active {
-                spatialMapping.startSpatialMapping()
-            } else {
-                spatialMapping.stopSpatialMapping()
+        .onReceive(communityManager.$assistanceRequests) { requests in
+            handleCommunityRequests(requests)
+        }
+        .onReceive(caregiverDashboard.$emergencyAlerts) { alerts in
+            handleEmergencyAlerts(alerts)
+        }
+    }
+    
+    // MARK: - Phase 3 Initialization
+    
+    private func initializePhase3Ecosystem() {
+        Task {
+            // Initialize AR/XR features
+            await initializeARFeatures()
+            
+            // Setup community platform
+            await setupCommunityIntegration()
+            
+            // Configure smart home integration
+            await configureSmartHome()
+            
+            // Initialize personalization
+            await setupPersonalization()
+            
+            // Setup caregiver features (if applicable)
+            await configureCaregiverFeatures()
+            
+            // Mark Phase 3 as ready
+            isPhase3Ready = true
+            
+            // Announce completion
+            speechOutput.speak("KaiSight complete ecosystem initialized. All advanced features ready.")
+        }
+    }
+    
+    private func initializeARFeatures() async {
+        // Setup AR overlays
+        arOverlayManager.startAROverlays()
+        
+        // Load community anchors
+        if let location = navigationAssistant.currentLocation {
+            let region = CLCircularRegion(center: location.coordinate, radius: 1000, identifier: "local")
+            arOverlayManager.loadCommunityAnchors(in: region)
+        }
+        
+        // Integrate with spatial mapping
+        spatialMapping.delegate = arOverlayManager as? SpatialMappingDelegate
+        obstacleDetection.delegate = arOverlayManager as? ObstacleDetectionDelegate
+        
+        Config.debugLog("AR/XR features initialized")
+    }
+    
+    private func setupCommunityIntegration() async {
+        // Connect to community platform
+        if !communityManager.isOnline {
+            // Auto-connect based on user preferences
+            if let profile = personalizationEngine.userProfile,
+               profile.preferences.social.participateInCommunity {
+                // Connect and setup profile
             }
         }
-        .onChange(of: obstacleDetectionActive) { active in
-            if active {
-                obstacleDetection.startObstacleDetection()
-            } else {
-                obstacleDetection.stopObstacleDetection()
+        
+        // Setup volunteer features if user is registered
+        if communityManager.userProfile?.isVolunteer == true {
+            communityManager.setVolunteerAvailability(true)
+        }
+        
+        Config.debugLog("Community integration setup complete")
+    }
+    
+    private func configureSmartHome() async {
+        // Connect to HomeKit if available
+        smartHomeManager.connectToHomeKit()
+        
+        // Setup location-based automation
+        smartHomeManager.setupLocationAutomation()
+        
+        // Register smart speaker integrations
+        smartHomeManager.setupSmartSpeakerIntegration()
+        
+        // Setup accessibility modes
+        if personalizationEngine.userProfile?.preferences.mobility.avoidStairs == true {
+            smartHomeManager.activateAccessibilityMode()
+        }
+        
+        Config.debugLog("Smart home integration configured")
+    }
+    
+    private func setupPersonalization() async {
+        // Start behavioral analysis
+        personalizationEngine.analyzeBehavioralPatterns()
+        
+        // Initialize federated learning (if opted in)
+        if personalizationEngine.userProfile?.privacySettings.participateInFederatedLearning == true {
+            personalizationEngine.participateInFederatedLearning()
+        }
+        
+        // Apply adaptive UI settings
+        let uiSettings = personalizationEngine.getAdaptiveUISettings()
+        adaptInterface(to: personalizationEngine.adaptiveSettings)
+        
+        Config.debugLog("Personalization engine activated")
+    }
+    
+    private func configureCaregiverFeatures() async {
+        // Check if user is enrolled in care program
+        let userID = personalizationEngine.userProfile?.id ?? UUID()
+        
+        // This would check against caregiver database
+        // For now, we'll initialize if caregiver profile exists
+        if caregiverDashboard.caregiverProfile != nil {
+            caregiverDashboard.toggleDutyStatus() // Set on duty if caregiver
+        }
+        
+        Config.debugLog("Caregiver features configured")
+    }
+    
+    // MARK: - Adaptive Interface Components
+    
+    @ViewBuilder
+    private func AdaptiveInterfaceOverlay() -> some View {
+        VStack {
+            // Top status bar with ecosystem information
+            EcosystemStatusBar()
+            
+            Spacer()
+            
+            // Bottom adaptive controls
+            AdaptiveControlPanel()
+        }
+        .animation(.easeInOut(duration: 0.3), value: adaptiveUI)
+    }
+    
+    @ViewBuilder
+    private func EcosystemStatusBar() -> some View {
+        HStack {
+            // AR Status
+            if arOverlayManager.isVisionProMode {
+                Image(systemName: "visionpro")
+                    .foregroundColor(.blue)
+            } else if !arOverlayManager.persistentOverlays.isEmpty {
+                Image(systemName: "arkit")
+                    .foregroundColor(.green)
+            }
+            
+            // Community Status
+            if communityManager.isOnline {
+                Image(systemName: "person.2.fill")
+                    .foregroundColor(.orange)
+                if !communityManager.nearbyUsers.isEmpty {
+                    Text("\(communityManager.nearbyUsers.count)")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+            }
+            
+            // Smart Home Status
+            if smartHomeManager.isConnected {
+                Image(systemName: "house.fill")
+                    .foregroundColor(.green)
+            }
+            
+            // Caregiver Status
+            if caregiverDashboard.isOnDuty {
+                Image(systemName: "cross.fill")
+                    .foregroundColor(.red)
+            }
+            
+            Spacer()
+            
+            // Personalization Level
+            if let level = personalizationEngine.userProfile?.learningLevel {
+                Text(level.rawValue.prefix(1).capitalized)
+                    .font(.caption)
+                    .padding(4)
+                    .background(Color.blue.opacity(0.7))
+                    .clipShape(Circle())
+            }
+        }
+        .padding(.horizontal)
+        .padding(.top, 8)
+    }
+    
+    @ViewBuilder
+    private func AdaptiveControlPanel() -> some View {
+        VStack(spacing: 16) {
+            // Mode switcher
+            ModeSelectionView()
+            
+            // Context-aware quick actions
+            ContextualQuickActions()
+            
+            // Main action button
+            MainActionButton()
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color.black.opacity(0.7))
+                .blur(radius: 10)
+        )
+    }
+    
+    @ViewBuilder
+    private func ModeSelectionView() -> some View {
+        HStack(spacing: 12) {
+            ForEach(KaiSightMode.allCases, id: \.self) { mode in
+                Button(action: {
+                    switchToMode(mode)
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: mode.icon)
+                            .font(.title2)
+                        Text(mode.title)
+                            .font(.caption)
+                    }
+                    .foregroundColor(currentMode == mode ? .blue : .white)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(currentMode == mode ? Color.blue.opacity(0.3) : Color.clear)
+                    )
+                }
+                .accessibilityLabel(mode.accessibilityLabel)
             }
         }
     }
     
-    // MARK: - UI Components
+    @ViewBuilder
+    private func ContextualQuickActions() -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 12) {
+            ForEach(getContextualActions(), id: \.id) { action in
+                Button(action: {
+                    executeQuickAction(action)
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: action.icon)
+                            .font(.title3)
+                        Text(action.title)
+                            .font(.caption2)
+                    }
+                    .foregroundColor(.white)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(action.color.opacity(0.7))
+                    )
+                }
+                .accessibilityLabel(action.accessibilityLabel)
+            }
+        }
+    }
     
-    private var statusHeader: some View {
-        VStack(spacing: 8) {
+    private func getContextualActions() -> [QuickAction] {
+        let currentContext = personalizationEngine.getCurrentContext()
+        
+        var actions: [QuickAction] = []
+        
+        // Always available core actions
+        actions.append(QuickAction(
+            id: "describe",
+            title: "Describe",
+            icon: "camera.viewfinder",
+            color: .blue,
+            accessibilityLabel: "Describe current scene",
+            action: .describeScene
+        ))
+        
+        // Context-aware actions based on location and patterns
+        if navigationAssistant.isNavigating {
+            actions.append(QuickAction(
+                id: "navigation",
+                title: "Navigate",
+                icon: "location.fill",
+                color: .green,
+                accessibilityLabel: "Navigation assistance",
+                action: .navigation
+            ))
+        }
+        
+        // Community actions if online
+        if communityManager.isOnline {
+            actions.append(QuickAction(
+                id: "community",
+                title: "Help",
+                icon: "person.2.fill",
+                color: .orange,
+                accessibilityLabel: "Request community assistance",
+                action: .requestHelp
+            ))
+        }
+        
+        // Smart home actions if connected
+        if smartHomeManager.isConnected {
+            actions.append(QuickAction(
+                id: "smarthome",
+                title: "Home",
+                icon: "house.fill",
+                color: .purple,
+                accessibilityLabel: "Smart home control",
+                action: .smartHome
+            ))
+        }
+        
+        // AR actions if available
+        if arOverlayManager.isVisionProMode || !arOverlayManager.persistentOverlays.isEmpty {
+            actions.append(QuickAction(
+                id: "ar",
+                title: "AR Info",
+                icon: "arkit",
+                color: .cyan,
+                accessibilityLabel: "AR overlay information",
+                action: .arInfo
+            ))
+        }
+        
+        // Emergency action
+        actions.append(QuickAction(
+            id: "emergency",
+            title: "Emergency",
+            icon: "exclamationmark.triangle.fill",
+            color: .red,
+            accessibilityLabel: "Emergency assistance",
+            action: .emergency
+        ))
+        
+        return Array(actions.prefix(8)) // Limit to 8 actions
+    }
+    
+    @ViewBuilder
+    private func MainActionButton() -> some View {
+        Button(action: performMainAction) {
             HStack {
-                // Mode Indicator
-                Image(systemName: modeIcon)
-                    .font(.system(size: 24))
-                    .foregroundColor(modeColor)
-                    .accessibilityLabel("Current mode: \(currentMode.rawValue)")
+                Image(systemName: getMainActionIcon())
+                    .font(.title2)
+                Text(getMainActionTitle())
+                    .font(.headline)
+            }
+            .foregroundColor(.white)
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.blue)
+            )
+        }
+        .accessibilityLabel(getMainActionAccessibilityLabel())
+    }
+    
+    // MARK: - Community Integration Views
+    
+    @ViewBuilder
+    private func CommunityInteractionOverlay() -> some View {
+        VStack {
+            Spacer()
+            
+            // Show pending assistance requests
+            if !communityManager.assistanceRequests.isEmpty {
+                ForEach(communityManager.assistanceRequests.prefix(3)) { request in
+                    CommunityRequestCard(request: request)
+                        .transition(.slide)
+                }
+            }
+            
+            // Show nearby community members
+            if !communityManager.nearbyUsers.isEmpty && currentMode == .community {
+                CommunityMembersOverlay()
+            }
+            
+            Spacer()
+        }
+    }
+    
+    @ViewBuilder
+    private func CommunityRequestCard(request: AssistanceRequest) -> some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text("Assistance Request")
+                    .font(.headline)
+                    .foregroundColor(.orange)
+                
+                Text(request.description)
+                    .font(.body)
+                    .foregroundColor(.white)
+                
+                Text("Urgency: \(request.urgency.rawValue)")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+            
+            Spacer()
+            
+            if communityManager.userProfile?.isVolunteer == true {
+                VStack {
+                    Button("Help") {
+                        communityManager.respondToAssistanceRequest(request, response: .accept)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    
+                    Button("Pass") {
+                        communityManager.respondToAssistanceRequest(request, response: .decline)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.black.opacity(0.8))
+        )
+        .padding(.horizontal)
+    }
+    
+    // MARK: - Smart Home Integration Views
+    
+    @ViewBuilder
+    private func SmartHomeControlOverlay() -> some View {
+        if currentMode == .smartHome && smartHomeManager.isConnected {
+            VStack {
+                HStack {
+                    Text("Smart Home Control")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Button("Close") {
+                        currentMode = .assistant
+                    }
+                    .foregroundColor(.blue)
+                }
+                .padding()
+                
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 16) {
+                    ForEach(smartHomeManager.devices.prefix(6), id: \.id) { device in
+                        SmartDeviceCard(device: device)
+                    }
+                }
+                .padding()
+                
+                Spacer()
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.black.opacity(0.9))
+            )
+            .transition(.move(edge: .bottom))
+        }
+    }
+    
+    @ViewBuilder
+    private func SmartDeviceCard(device: SmartDevice) -> some View {
+        VStack {
+            Image(systemName: device.type.icon)
+                .font(.title)
+                .foregroundColor(device.isOn ? .green : .gray)
+            
+            Text(device.name)
+                .font(.caption)
+                .multilineTextAlignment(.center)
+                .foregroundColor(.white)
+            
+            Text(device.room)
+                .font(.caption2)
+                .foregroundColor(.gray)
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.gray.opacity(0.3))
+        )
+        .onTapGesture {
+            toggleSmartDevice(device)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(device.name) in \(device.room), currently \(device.isOn ? "on" : "off")")
+        .accessibilityHint("Double tap to toggle")
+    }
+    
+    // MARK: - AR Overlay Views
+    
+    @ViewBuilder
+    private func VisionProAROverlay() -> some View {
+        // Vision Pro specific AR interface
+        ForEach(arOverlayManager.persistentOverlays) { overlay in
+            ARInfoOverlayView(overlay: overlay)
+                .position(
+                    x: CGFloat(overlay.position.x) * UIScreen.main.bounds.width,
+                    y: CGFloat(overlay.position.y) * UIScreen.main.bounds.height
+                )
+        }
+        
+        // Hand tracking indicators
+        if arOverlayManager.handTrackingEnabled {
+            HandTrackingIndicator()
+        }
+        
+        // Eye tracking focus indicator
+        if arOverlayManager.eyeTrackingEnabled {
+            EyeTrackingFocusIndicator()
+        }
+    }
+    
+    @ViewBuilder
+    private func StandardAROverlay() -> some View {
+        // Standard AR interface for iPhone/iPad
+        ForEach(arOverlayManager.persistentOverlays) { overlay in
+            ARInfoOverlayView(overlay: overlay)
+        }
+        
+        // Obstacle markers
+        ForEach(arOverlayManager.obstacleMarkers) { marker in
+            ARObstacleMarkerView(marker: marker)
+        }
+        
+        // Navigation path
+        if let path = arOverlayManager.navigationPath {
+            ARNavigationPathView(path: path)
+        }
+    }
+    
+    // MARK: - Caregiver Monitoring Views
+    
+    @ViewBuilder
+    private func CaregiverMonitoringOverlay() -> some View {
+        VStack {
+            HStack {
+                Image(systemName: "cross.fill")
+                    .foregroundColor(.red)
+                
+                Text("On Duty")
+                    .font(.caption)
+                    .foregroundColor(.white)
                 
                 Spacer()
                 
-                // Real-time Info
-                if realTimeNarrator.isNarrating {
-                    VStack(alignment: .trailing) {
-                        Text("Live Narration")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                        
-                        Text("\(realTimeNarrator.detectedObjects.count) objects")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                // Voice Agent Status
-                if voiceAgent.isListening {
-                    Image(systemName: "mic.fill")
-                        .font(.title2)
+                if !caregiverDashboard.emergencyAlerts.isEmpty {
+                    Text("\(caregiverDashboard.emergencyAlerts.count) alerts")
+                        .font(.caption)
                         .foregroundColor(.red)
-                        .pulsating()
+                        .padding(4)
+                        .background(Color.red.opacity(0.3))
+                        .clipShape(Capsule())
                 }
             }
             .padding(.horizontal)
-            
-            // Status Message
-            Text(statusMessage)
-                .font(.title3)
-                .fontWeight(.medium)
-                .multilineTextAlignment(.center)
-                .accessibilityLiveRegion(.polite)
-            
-            // Current Narration
-            if !realTimeNarrator.currentNarration.isEmpty {
-                Text(realTimeNarrator.currentNarration)
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .padding(.horizontal)
-            }
-        }
-        .padding()
-        .background(Color.secondary.opacity(0.1))
-        .cornerRadius(12)
-        .padding(.horizontal)
-    }
-    
-    private var mainContentArea: some View {
-        HStack(spacing: 16) {
-            // Camera Preview
-            ZStack {
-                CameraPreview(session: cameraManager.getSession())
-                    .aspectRatio(4/3, contentMode: .fit)
-                    .cornerRadius(12)
-                    .accessibilityHidden(true)
-                
-                // Recognition Overlays
-                if !familiarRecognition.recognitionResults.isEmpty {
-                    recognitionOverlay
-                }
-            }
-            
-            // Information Panel
-            informationPanel
-                .frame(maxWidth: .infinity)
-        }
-        .padding(.horizontal)
-    }
-    
-    private var recognitionOverlay: some View {
-        VStack {
-            ForEach(Array(familiarRecognition.recognitionResults.enumerated()), id: \.offset) { index, result in
-                HStack {
-                    Image(systemName: result.type == .person ? "person.fill" : "cube.fill")
-                        .foregroundColor(result.type == .person ? .blue : .orange)
-                    
-                    Text(result.name)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                    
-                    Spacer()
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.black.opacity(0.7))
-                .foregroundColor(.white)
-                .cornerRadius(8)
-            }
-            Spacer()
-        }
-        .padding(8)
-    }
-    
-    private var informationPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Navigation Status
-            if navigationAssistant.isNavigating {
-                VStack(alignment: .leading) {
-                    Text("Navigation Active")
-                        .font(.headline)
-                        .foregroundColor(.red)
-                    
-                    Text(navigationAssistant.getNavigationSummary())
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .padding()
-                .background(Color.red.opacity(0.1))
-                .cornerRadius(8)
-            }
-            
-            // Recent Conversation
-            if let lastCommand = voiceAgent.conversationHistory.last {
-                VStack(alignment: .leading) {
-                    Text("Last Command")
-                        .font(.headline)
-                    
-                    Text(lastCommand.userInput)
-                        .font(.caption)
-                        .italic()
-                    
-                    if let response = lastCommand.assistantResponse {
-                        Text(response)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding()
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(8)
-            }
-            
-            // Familiar Faces Detected
-            let familiarPeople = familiarRecognition.recognitionResults.filter { $0.type == .person }
-            if !familiarPeople.isEmpty {
-                VStack(alignment: .leading) {
-                    Text("People Nearby")
-                        .font(.headline)
-                    
-                    ForEach(Array(familiarPeople.enumerated()), id: \.offset) { index, person in
-                        HStack {
-                            Image(systemName: "person.circle.fill")
-                                .foregroundColor(.blue)
-                            Text(person.name)
-                                .font(.caption)
-                            Spacer()
-                            Text("\(Int(person.confidence * 100))%")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                .padding()
-                .background(Color.green.opacity(0.1))
-                .cornerRadius(8)
-            }
+            .padding(.top, 8)
             
             Spacer()
         }
     }
     
-    private var quickActionsGrid: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
-            // Mode Controls
-            KaiSightActionButton(
-                title: "Standard",
-                icon: "eye.fill",
-                color: currentMode == .standard ? .blue : .gray,
-                isSelected: currentMode == .standard
-            ) {
-                currentMode = .standard
-            }
-            
-            KaiSightActionButton(
-                title: "Narration",
-                icon: "speaker.wave.2.fill",
-                color: currentMode == .narration ? .green : .gray,
-                isSelected: currentMode == .narration
-            ) {
-                currentMode = .narration
-            }
-            
-            KaiSightActionButton(
-                title: "Recognition",
-                icon: "person.2.fill",
-                color: currentMode == .recognition ? .purple : .gray,
-                isSelected: currentMode == .recognition
-            ) {
-                currentMode = .recognition
-            }
-            
-            // Quick Actions
-            KaiSightActionButton(
-                title: "Describe",
-                icon: "eye.circle.fill",
-                color: .orange
-            ) {
-                describeScene()
-            }
-            
-            KaiSightActionButton(
-                title: "Find People",
-                icon: "person.crop.circle.fill",
-                color: .mint
-            ) {
-                findFamiliarPeople()
-            }
-            
-            KaiSightActionButton(
-                title: "Navigate",
-                icon: "location.circle.fill",
-                color: .indigo
-            ) {
-                showNavigationOptions()
-            }
-            
-            KaiSightActionButton(
-                title: "Emergency",
-                icon: "phone.circle.fill",
-                color: .red
-            ) {
-                activateEmergency()
-            }
-            
-            KaiSightActionButton(
-                title: "Add Person",
-                icon: "person.badge.plus.fill",
-                color: .teal
-            ) {
-                showingFamiliarPeople = true
-            }
-            
-            KaiSightActionButton(
-                title: "Settings",
-                icon: "gear.circle.fill",
-                color: .secondary
-            ) {
-                showingSettings = true
-            }
-        }
-        .padding(.horizontal)
+    // MARK: - Action Handlers
+    
+    private func switchToMode(_ mode: KaiSightMode) {
+        currentMode = mode
+        
+        // Record interaction for personalization
+        let interaction = UserInteraction(
+            id: UUID(),
+            type: .settingsChange,
+            timestamp: Date(),
+            context: personalizationEngine.getCurrentContext(),
+            details: ["mode": mode.rawValue],
+            wasSuccessful: true,
+            userFeedback: nil
+        )
+        personalizationEngine.recordUserInteraction(interaction)
+        
+        // Announce mode change
+        speechOutput.speak("Switched to \(mode.title) mode")
     }
     
-    private var voiceControlsArea: some View {
-        HStack(spacing: 20) {
-            // Voice Agent Mode Selector
-            Picker("Voice Mode", selection: $voiceAgent.agentMode) {
-                ForEach(AgentMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
-            }
-            .pickerStyle(SegmentedPickerStyle())
-            .frame(maxWidth: .infinity)
-            
-            // Main Voice Button
-            Button(action: handleVoiceInput) {
-                VStack {
-                    Image(systemName: voiceAgent.isListening ? "stop.circle.fill" : "mic.circle.fill")
-                        .font(.system(size: 40))
-                    Text(voiceAgent.isListening ? "Stop" : "Talk")
-                        .font(.caption)
-                }
-                .foregroundColor(.white)
-                .frame(width: 80, height: 80)
-                .background(voiceAgent.isListening ? Color.red : Color.blue)
-                .cornerRadius(40)
-                .scaleEffect(voiceAgent.isListening ? 1.1 : 1.0)
-                .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: voiceAgent.isListening)
-            }
-            .disabled(isProcessing)
-            .accessibilityLabel(voiceAgent.isListening ? "Stop listening" : "Start voice command")
-        }
-        .padding(.horizontal)
-    }
-    
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            HStack {
-                Text("KaiSight")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                
-                if isProcessing {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                }
-            }
+    private func executeQuickAction(_ action: QuickAction) {
+        switch action.action {
+        case .describeScene:
+            performSceneDescription()
+        case .navigation:
+            activateNavigation()
+        case .requestHelp:
+            requestCommunityHelp()
+        case .smartHome:
+            activateSmartHomeControl()
+        case .arInfo:
+            provideFarInfo()
+        case .emergency:
+            triggerEmergency()
         }
         
-        ToolbarItem(placement: .topBarTrailing) {
-            HStack {
-                // Battery status for awareness
-                if UIDevice.current.batteryLevel > 0 {
-                    Text("\(Int(UIDevice.current.batteryLevel * 100))%")
-                        .font(.caption)
-                        .foregroundColor(UIDevice.current.batteryLevel < 0.2 ? .red : .secondary)
-                }
-                
-                Button(action: { showingSettings = true }) {
-                    Image(systemName: "gear")
-                        .font(.title2)
-                }
-                .accessibilityLabel("Settings")
-            }
-        }
+        // Record interaction
+        let interaction = UserInteraction(
+            id: UUID(),
+            type: .voiceCommand,
+            timestamp: Date(),
+            context: personalizationEngine.getCurrentContext(),
+            details: ["action": action.id],
+            wasSuccessful: true,
+            userFeedback: nil
+        )
+        personalizationEngine.recordUserInteraction(interaction)
     }
     
-    // MARK: - UI Properties
-    
-    private var modeIcon: String {
+    private func performMainAction() {
         switch currentMode {
-        case .standard: return "eye.fill"
-        case .narration: return "speaker.wave.2.fill"
-        case .recognition: return "person.2.fill"
+        case .assistant:
+            performSceneDescription()
+        case .navigation:
+            activateNavigation()
+        case .community:
+            requestCommunityHelp()
+        case .smartHome:
+            activateSmartHomeControl()
+        case .ar:
+            provideFarInfo()
+        case .caregiver:
+            openCaregiverDashboard()
         }
     }
     
-    private var modeColor: Color {
+    private func performSceneDescription() {
+        guard let image = cameraManager.capturePhoto() else { return }
+        
+        // Use personalized description based on user learning level
+        let detailLevel = personalizationEngine.adaptiveSettings.detailLevel
+        
+        gptManager.analyzeImage(image, detailLevel: detailLevel) { description in
+            speechOutput.speak(description)
+            
+            // Check for custom objects
+            personalizationEngine.recognizeCustomObjects(in: image) { customObjects in
+                if !customObjects.isEmpty {
+                    let customDescription = "I also recognize your personal items: \(customObjects.map { $0.name }.joined(separator: ", "))"
+                    speechOutput.speak(customDescription)
+                }
+            }
+        }
+    }
+    
+    private func requestCommunityHelp() {
+        communityManager.requestAssistance(
+            type: .identification,
+            description: "Need help identifying objects in current scene",
+            urgency: .normal
+        )
+    }
+    
+    private func activateSmartHomeControl() {
+        currentMode = .smartHome
+        speechOutput.speak("Smart home control activated")
+    }
+    
+    private func provideFarInfo() {
+        let summary = arOverlayManager.getOverlaySummary()
+        speechOutput.speak(summary)
+    }
+    
+    private func triggerEmergency() {
+        // Trigger emergency across all systems
+        communityManager.triggerEmergencyAlert(description: "Emergency assistance needed")
+        
+        if caregiverDashboard.isOnDuty {
+            // Caregiver emergency protocol
+        }
+        
+        // Emergency smart home actions
+        smartHomeManager.activateEmergencyMode()
+        
+        speechOutput.speak("Emergency alert activated across all systems", priority: .emergency)
+    }
+    
+    private func toggleSmartDevice(_ device: SmartDevice) {
+        switch device.type {
+        case .light:
+            smartHomeManager.controlLight(device: device, state: !device.isOn)
+        case .lock:
+            smartHomeManager.controlLock(device: device, locked: !device.isOn)
+        default:
+            speechOutput.speak("Device control not yet implemented for \(device.type.rawValue)")
+        }
+    }
+    
+    // MARK: - Event Handlers
+    
+    private func handleCommunityRequests(_ requests: [AssistanceRequest]) {
+        // Filter requests based on user's volunteer status and preferences
+        let relevantRequests = requests.filter { request in
+            guard communityManager.userProfile?.isVolunteer == true else { return false }
+            
+            // Filter based on user preferences and capabilities
+            return true // Simplified for demo
+        }
+        
+        if !relevantRequests.isEmpty {
+            speechOutput.speak("New assistance requests available")
+        }
+    }
+    
+    private func handleEmergencyAlerts(_ alerts: [EmergencyAlert]) {
+        let pendingAlerts = alerts.filter { $0.status == .pending }
+        
+        if !pendingAlerts.isEmpty {
+            speechOutput.speak("Emergency alerts requiring attention", priority: .emergency)
+        }
+    }
+    
+    private func adaptInterface(to settings: AdaptiveSettings) {
+        // Adapt speech rate
+        speechOutput.rate = settings.speechRate
+        
+        // Adapt detail level
+        gptManager.defaultDetailLevel = settings.detailLevel
+        
+        // Adapt haptic feedback
+        // Implementation for haptic intensity adjustment
+        
+        // Update adaptive UI state
+        adaptiveUI.speechRate = settings.speechRate
+        adaptiveUI.detailLevel = settings.detailLevel
+        adaptiveUI.proactiveAssistance = settings.proactiveAssistance
+    }
+    
+    // MARK: - Utility Methods
+    
+    private func getMainActionIcon() -> String {
         switch currentMode {
-        case .standard: return .blue
-        case .narration: return .green
-        case .recognition: return .purple
+        case .assistant: return "camera.viewfinder"
+        case .navigation: return "location.fill"
+        case .community: return "person.2.fill"
+        case .smartHome: return "house.fill"
+        case .ar: return "arkit"
+        case .caregiver: return "cross.fill"
         }
     }
     
-    // MARK: - Actions
-    
-    private func setupKaiSight() {
-        statusMessage = "KaiSight ready - Choose your mode"
-        speechOutput.speak("Welcome to KaiSight. Your enhanced vision assistant is ready.")
-        
-        // Enable battery monitoring
-        UIDevice.current.isBatteryMonitoringEnabled = true
-        
-        setupCoreFeatures()
-        setupPhase2Features()
-    }
-    
-    private func setupCoreFeatures() {
-        // Initialize spatial mapping if supported
-        if ARWorldTrackingConfiguration.isSupported {
-            spatialMapping.startSpatialMapping()
-            spatialMappingActive = true
-        }
-        
-        // Initialize advanced obstacle detection
-        obstacleDetection.startObstacleDetection()
-        obstacleDetectionActive = true
-        
-        // Initialize cloud sync
-        if cloudSync.cloudAccountStatus == .available {
-            cloudSync.startManualSync()
-        }
-        
-        Config.debugLog("KaiSight core features initialized")
-    }
-    
-    private func setupPhase2Features() {
-        // Initialize spatial mapping if supported
-        if ARWorldTrackingConfiguration.isSupported {
-            spatialMapping.startSpatialMapping()
-            spatialMappingActive = true
-        }
-        
-        // Initialize advanced obstacle detection
-        obstacleDetection.startObstacleDetection()
-        obstacleDetectionActive = true
-        
-        // Initialize cloud sync
-        if cloudSync.cloudAccountStatus == .available {
-            cloudSync.startManualSync()
-        }
-        
-        Config.debugLog("KaiSight Phase 2 features initialized")
-    }
-    
-    private func handleModeChange(_ mode: KaiSightMode) {
-        switch mode {
-        case .standard:
-            realTimeNarrator.stopNarration()
-            statusMessage = "Standard mode - Tap actions or use voice"
-            speechOutput.speak("Standard mode activated")
-            
-        case .narration:
-            realTimeNarrator.startNarration()
-            statusMessage = "Live narration mode - Describing surroundings"
-            speechOutput.speak("Real-time narration mode activated")
-            
-        case .recognition:
-            statusMessage = "Recognition mode - Identifying familiar faces and objects"
-            speechOutput.speak("Familiar recognition mode activated")
-            startContinuousRecognition()
+    private func getMainActionTitle() -> String {
+        switch currentMode {
+        case .assistant: return "Describe Scene"
+        case .navigation: return "Navigate"
+        case .community: return "Request Help"
+        case .smartHome: return "Control Home"
+        case .ar: return "AR Info"
+        case .caregiver: return "Dashboard"
         }
     }
     
-    private func handleVoiceInput() {
-        switch voiceAgent.agentMode {
-        case .pushToTalk:
-            if voiceAgent.isListening {
-                voiceAgent.stopListening()
-            } else {
-                voiceAgent.startListening()
-            }
-        case .wakeWord, .continuous:
-            // Mode is managed automatically by the agent
-            break
+    private func getMainActionAccessibilityLabel() -> String {
+        switch currentMode {
+        case .assistant: return "Describe current scene using AI vision"
+        case .navigation: return "Start navigation assistance"
+        case .community: return "Request help from community volunteers"
+        case .smartHome: return "Access smart home controls"
+        case .ar: return "Get augmented reality information"
+        case .caregiver: return "Open caregiver dashboard"
         }
-    }
-    
-    private func describeScene() {
-        isProcessing = true
-        statusMessage = "Analyzing scene..."
-        
-        cameraManager.capturePhoto()
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            // Combine regular description with familiar recognition
-            let group = DispatchGroup()
-            var sceneDescription = ""
-            var familiarEntities: [String] = []
-            
-            // Get regular scene description
-            group.enter()
-            let gpt = GPTManager()
-            gpt.ask(prompt: "Describe this scene in detail for a blind user", image: cameraManager.capturedImage) { description in
-                sceneDescription = description
-                group.leave()
-            }
-            
-            // Get familiar recognition
-            group.enter()
-            if let image = cameraManager.capturedImage {
-                familiarRecognition.recognizeFamiliarEntities(in: image) { results in
-                    familiarEntities = results.map { "\($0.name) (\($0.details))" }
-                    group.leave()
-                }
-            } else {
-                group.leave()
-            }
-            
-            group.notify(queue: .main) {
-                var fullDescription = sceneDescription
-                
-                if !familiarEntities.isEmpty {
-                    fullDescription += " I recognize: \(familiarEntities.joined(separator: ", "))"
-                }
-                
-                speechOutput.speak(fullDescription)
-                statusMessage = "Scene described"
-                isProcessing = false
-            }
-        }
-    }
-    
-    private func findFamiliarPeople() {
-        guard let image = cameraManager.capturedImage else {
-            speechOutput.speak("Please wait for camera to be ready")
-            return
-        }
-        
-        isProcessing = true
-        statusMessage = "Looking for familiar people..."
-        
-        familiarRecognition.recognizeFamiliarEntities(in: image) { results in
-            let people = results.filter { $0.type == .person }
-            
-            if people.isEmpty {
-                speechOutput.speak("No familiar people detected in view")
-            } else {
-                let descriptions = people.map { "\($0.name), \($0.details)" }
-                speechOutput.speak("I can see: \(descriptions.joined(separator: ", "))")
-            }
-            
-            statusMessage = "KaiSight ready"
-            isProcessing = false
-        }
-    }
-    
-    private func showNavigationOptions() {
-        let alert = UIAlertController(title: "Navigation", message: "Choose navigation option", preferredStyle: .actionSheet)
-        
-        alert.addAction(UIAlertAction(title: "Go Home", style: .default) { _ in
-            navigationAssistant.returnHome { result in
-                speechOutput.speak(result)
-            }
-        })
-        
-        alert.addAction(UIAlertAction(title: "Find Nearest Contact", style: .default) { _ in
-            navigationAssistant.findNearestEmergencyContact { result in
-                speechOutput.speak(result)
-            }
-        })
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first {
-            window.rootViewController?.present(alert, animated: true)
-        }
-    }
-    
-    private func activateEmergency() {
-        navigationAssistant.requestEmergencyHelp { emergencyMessage in
-            speechOutput.speak("Emergency assistance activated. \(emergencyMessage)", priority: .high)
-        }
-    }
-    
-    private func startContinuousRecognition() {
-        Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { timer in
-            guard currentMode == .recognition else {
-                timer.invalidate()
-                return
-            }
-            
-            guard let image = cameraManager.capturedImage else { return }
-            
-            familiarRecognition.recognizeFamiliarEntities(in: image) { results in
-                // Update UI with recognition results
-                // Results are automatically published via @Published
-            }
-        }
-    }
-    
-    // MARK: - Phase 2 UI Components
-    
-    private var topStatusBar: some View {
-        HStack {
-            // Mode Indicator
-            Image(systemName: modeIcon)
-                .font(.system(size: 24))
-                .foregroundColor(modeColor)
-                .accessibilityLabel("Current mode: \(currentMode.rawValue)")
-            
-            Spacer()
-            
-            // Phase 2 status indicators
-            if spatialMapping.isARActive {
-                Label("AR", systemImage: "arkit")
-                    .font(.caption)
-                    .foregroundColor(.blue)
-                    .accessibilityLabel("Spatial mapping active")
-            }
-            
-            if obstacleDetection.isActive {
-                Label("LiDAR", systemImage: "sensor.fill")
-                    .font(.caption)
-                    .foregroundColor(.green)
-                    .accessibilityLabel("Advanced obstacle detection active")
-            }
-            
-            // Cloud sync status
-            syncStatusIndicator
-            
-            Spacer()
-            
-            // Real-time Info
-            if realTimeNarrator.isNarrating {
-                VStack(alignment: .trailing) {
-                    Text("Live Narration")
-                        .font(.caption)
-                        .foregroundColor(.green)
-                    
-                    Text("\(realTimeNarrator.detectedObjects.count) objects")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            // Voice Agent Status
-            if voiceAgent.isListening {
-                Image(systemName: "mic.fill")
-                    .font(.title2)
-                    .foregroundColor(.red)
-                    .pulsating()
-            }
-        }
-        .padding(.horizontal)
-        .padding(.top)
-    }
-    
-    private var syncStatusIndicator: some View {
-        Group {
-            switch cloudSync.syncStatus {
-            case .syncing:
-                Label("\(Int(cloudSync.syncProgress * 100))%", systemImage: "icloud.and.arrow.up")
-                    .font(.caption)
-                    .foregroundColor(.orange)
-            case .completed:
-                Label("Synced", systemImage: "icloud.fill")
-                    .font(.caption)
-                    .foregroundColor(.green)
-            case .failed:
-                Label("Sync Failed", systemImage: "icloud.slash")
-                    .font(.caption)
-                    .foregroundColor(.red)
-            case .idle:
-                if cloudSync.cloudAccountStatus == .available {
-                    Label("Cloud", systemImage: "icloud")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                }
-            }
-        }
-        .accessibilityLabel(cloudSync.getSyncStatusDescription())
-    }
-    
-    private var phase2ControlButtons: some View {
-        HStack(spacing: 20) {
-            // Spatial mapping toggle
-            Button(action: {
-                spatialMappingActive.toggle()
-                provideFeedback()
-            }) {
-                VStack {
-                    Image(systemName: spatialMappingActive ? "arkit" : "arkit")
-                        .font(.title2)
-                        .foregroundColor(spatialMappingActive ? .blue : .white)
-                    Text("Spatial Map")
-                        .font(.caption)
-                }
-            }
-            .frame(width: 80, height: 60)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(spatialMappingActive ? Color.blue.opacity(0.3) : Color.black.opacity(0.6))
-            )
-            .accessibilityLabel("Spatial mapping")
-            .accessibilityHint("Toggle 3D room mapping and navigation anchors")
-            .onTapGesture {
-                showSpatialMapping = true
-            }
-            
-            // Advanced obstacle detection toggle
-            Button(action: {
-                obstacleDetectionActive.toggle()
-                provideFeedback()
-            }) {
-                VStack {
-                    Image(systemName: obstacleDetectionActive ? "sensor.fill" : "sensor")
-                        .font(.title2)
-                        .foregroundColor(obstacleDetectionActive ? .green : .white)
-                    Text("LiDAR Nav")
-                        .font(.caption)
-                }
-            }
-            .frame(width: 80, height: 60)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(obstacleDetectionActive ? Color.green.opacity(0.3) : Color.black.opacity(0.6))
-            )
-            .accessibilityLabel("Advanced obstacle detection")
-            .accessibilityHint("Toggle LiDAR-based obstacle detection and path guidance")
-            .onTapGesture {
-                showObstacleDetection = true
-            }
-            
-            // Cloud sync button
-            Button(action: {
-                showCloudSync = true
-                provideFeedback()
-            }) {
-                VStack {
-                    Image(systemName: "icloud.and.arrow.up.and.down")
-                        .font(.title2)
-                        .foregroundColor(.white)
-                    Text("Sync")
-                        .font(.caption)
-                }
-            }
-            .frame(width: 80, height: 60)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.black.opacity(0.6))
-            )
-            .accessibilityLabel("Cloud sync")
-            .accessibilityHint("Manage cloud synchronization and backup")
-        }
-        .padding(.horizontal)
-    }
-    
-    // MARK: - Phase 2 Overlay Panels
-    
-    private var spatialMappingPanel: some View {
-        VStack(spacing: 20) {
-            Text("Spatial Mapping")
-                .font(.title2)
-                .fontWeight(.bold)
-                .foregroundColor(.white)
-            
-            // Room layout description
-            if let layout = spatialMapping.roomLayout {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Room: \(String(format: "%.1f", layout.bounds.width))m × \(String(format: "%.1f", layout.bounds.length))m")
-                        .foregroundColor(.white)
-                    
-                    Text("Walls: \(layout.walls.count)")
-                        .foregroundColor(.white)
-                    
-                    if !layout.openings.isEmpty {
-                        Text("Openings: \(layout.openings.count)")
-                            .foregroundColor(.white)
-                    }
-                }
-            } else {
-                Text("Analyzing room layout...")
-                    .foregroundColor(.gray)
-            }
-            
-            // Spatial anchors
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Saved Anchors: \(spatialMapping.spatialAnchors.count)")
-                    .foregroundColor(.white)
-                
-                if !spatialMapping.spatialAnchors.isEmpty {
-                    ForEach(spatialMapping.spatialAnchors.prefix(3)) { anchor in
-                        Text("• \(anchor.name)")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                }
-            }
-            
-            HStack(spacing: 15) {
-                Button("Add Anchor") {
-                    // Add spatial anchor at current position
-                    let position = simd_float3(0, 0, 0) // Get from current camera position
-                    spatialMapping.addSpatialAnchor(
-                        name: "Location \(spatialMapping.spatialAnchors.count + 1)",
-                        description: "Saved location",
-                        at: position
-                    )
-                    provideFeedback()
-                }
-                .padding()
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(8)
-                
-                Button("Speak Layout") {
-                    spatialMapping.speakSpatialContext()
-                    provideFeedback()
-                }
-                .padding()
-                .background(Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(8)
-            }
-            
-            Button("Close") {
-                showSpatialMapping = false
-                provideFeedback()
-            }
-            .padding()
-            .background(Color.gray)
-            .foregroundColor(.white)
-            .cornerRadius(8)
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.black.opacity(0.9))
-        )
-        .accessibilityElement(children: .combine)
-    }
-    
-    private var obstacleDetectionPanel: some View {
-        VStack(spacing: 20) {
-            Text("Advanced Navigation")
-                .font(.title2)
-                .fontWeight(.bold)
-                .foregroundColor(.white)
-            
-            // Obstacle summary
-            Text(obstacleDetection.getObstacleSummary())
-                .foregroundColor(.white)
-                .multilineTextAlignment(.center)
-            
-            // Path guidance
-            if let pathDirection = obstacleDetection.safePathDirection {
-                VStack {
-                    Image(systemName: pathDirectionIcon(pathDirection))
-                        .font(.title)
-                        .foregroundColor(pathDirectionColor(pathDirection))
-                    
-                    Text(pathDirection.description.capitalized)
-                        .font(.headline)
-                        .foregroundColor(.white)
-                }
-            }
-            
-            // Obstacle warnings
-            if !obstacleDetection.obstacleWarnings.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Warnings:")
-                        .font(.headline)
-                        .foregroundColor(.orange)
-                    
-                    ForEach(obstacleDetection.obstacleWarnings.prefix(3), id: \.obstacle.id) { warning in
-                        Text("• \(warning.message)")
-                            .font(.caption)
-                            .foregroundColor(warningColor(warning.type))
-                    }
-                }
-            }
-            
-            HStack(spacing: 15) {
-                Button("Speak Status") {
-                    obstacleDetection.speakObstacleSummary()
-                    provideFeedback()
-                }
-                .padding()
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(8)
-                
-                Button("Toggle Mode") {
-                    obstacleDetectionActive.toggle()
-                    provideFeedback()
-                }
-                .padding()
-                .background(obstacleDetectionActive ? Color.red : Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(8)
-            }
-            
-            Button("Close") {
-                showObstacleDetection = false
-                provideFeedback()
-            }
-            .padding()
-            .background(Color.gray)
-            .foregroundColor(.white)
-            .cornerRadius(8)
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.black.opacity(0.9))
-        )
-        .accessibilityElement(children: .combine)
-    }
-    
-    private var cloudSyncPanel: some View {
-        VStack(spacing: 20) {
-            Text("Cloud Sync")
-                .font(.title2)
-                .fontWeight(.bold)
-                .foregroundColor(.white)
-            
-            // Account status
-            VStack {
-                Text(cloudSync.getCloudAccountDescription())
-                    .foregroundColor(cloudSync.cloudAccountStatus == .available ? .green : .orange)
-                
-                Text(cloudSync.getSyncStatusDescription())
-                    .foregroundColor(.white)
-                    .font(.caption)
-            }
-            
-            // Sync progress
-            if cloudSync.syncStatus == .syncing {
-                ProgressView(value: cloudSync.syncProgress)
-                    .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                    .frame(height: 4)
-            }
-            
-            // Last sync info
-            if let lastSync = cloudSync.lastSyncDate {
-                Text("Last sync: \(formatSyncDate(lastSync))")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-            }
-            
-            VStack(spacing: 10) {
-                Button("Manual Sync") {
-                    cloudSync.startManualSync()
-                    provideFeedback()
-                }
-                .padding()
-                .background(cloudSync.cloudAccountStatus == .available ? Color.blue : Color.gray)
-                .foregroundColor(.white)
-                .cornerRadius(8)
-                .disabled(cloudSync.cloudAccountStatus != .available)
-                
-                Text("Syncs: Settings, Familiar faces, Spatial anchors, Saved locations")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-                    .multilineTextAlignment(.center)
-            }
-            
-            Button("Close") {
-                showCloudSync = false
-                provideFeedback()
-            }
-            .padding()
-            .background(Color.gray)
-            .foregroundColor(.white)
-            .cornerRadius(8)
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.black.opacity(0.9))
-        )
-        .accessibilityElement(children: .combine)
-    }
-    
-    // MARK: - Phase 2 Helper Methods
-    
-    private func pathDirectionIcon(_ direction: PathDirection) -> String {
-        switch direction {
-        case .left: return "arrow.turn.up.left"
-        case .forward: return "arrow.up"
-        case .right: return "arrow.turn.up.right"
-        case .stop: return "hand.raised.fill"
-        }
-    }
-    
-    private func pathDirectionColor(_ direction: PathDirection) -> Color {
-        switch direction {
-        case .left, .right: return .yellow
-        case .forward: return .green
-        case .stop: return .red
-        }
-    }
-    
-    private func warningColor(_ warningType: WarningType) -> Color {
-        switch warningType {
-        case .info: return .blue
-        case .warning: return .orange
-        case .critical: return .red
-        }
-    }
-    
-    private func formatSyncDate(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.dateTimeStyle = .named
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
-    
-    private func provideFeedback() {
-        // Implement feedback mechanism
     }
 }
 
-// MARK: - Supporting Types
+// MARK: - Data Models
 
 enum KaiSightMode: String, CaseIterable {
-    case standard = "Standard"
-    case narration = "Live Narration"
-    case recognition = "Face Recognition"
+    case assistant = "assistant"
+    case navigation = "navigation"
+    case community = "community"
+    case smartHome = "smart_home"
+    case ar = "ar"
+    case caregiver = "caregiver"
+    
+    var title: String {
+        switch self {
+        case .assistant: return "Assistant"
+        case .navigation: return "Navigate"
+        case .community: return "Community"
+        case .smartHome: return "Home"
+        case .ar: return "AR"
+        case .caregiver: return "Care"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .assistant: return "brain.head.profile"
+        case .navigation: return "location"
+        case .community: return "person.2"
+        case .smartHome: return "house"
+        case .ar: return "arkit"
+        case .caregiver: return "cross"
+        }
+    }
+    
+    var accessibilityLabel: String {
+        switch self {
+        case .assistant: return "AI Assistant mode"
+        case .navigation: return "Navigation assistance mode"
+        case .community: return "Community interaction mode"
+        case .smartHome: return "Smart home control mode"
+        case .ar: return "Augmented reality mode"
+        case .caregiver: return "Caregiver dashboard mode"
+        }
+    }
 }
 
-// MARK: - Custom Views
-
-struct KaiSightActionButton: View {
+struct QuickAction: Identifiable {
+    let id: String
     let title: String
     let icon: String
     let color: Color
-    var isSelected: Bool = false
-    let action: () -> Void
+    let accessibilityLabel: String
+    let action: QuickActionType
+}
+
+enum QuickActionType {
+    case describeScene
+    case navigation
+    case requestHelp
+    case smartHome
+    case arInfo
+    case emergency
+}
+
+struct EcosystemStatus {
+    var arActive = false
+    var communityConnected = false
+    var smartHomeConnected = false
+    var caregiverOnDuty = false
+    var personalizationLevel: LearningLevel = .beginner
+}
+
+struct AdaptiveUIState {
+    var speechRate: Double = 0.5
+    var detailLevel: DetailLevel = .medium
+    var proactiveAssistance = true
+    var currentContext: String = "general"
+}
+
+// MARK: - Supporting Views
+
+struct CameraPreviewView: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        // Camera preview implementation
+        return UIView()
+    }
+    
+    func updateUIView(_ uiView: UIView, context: Context) {
+        // Update camera preview
+    }
+}
+
+struct ARInfoOverlayView: View {
+    let overlay: ARInfoOverlay
     
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundColor(isSelected ? .white : color)
-                
-                Text(title)
-                    .font(.caption)
-                    .foregroundColor(isSelected ? .white : color)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 60)
-            .background(isSelected ? color : color.opacity(0.1))
-            .cornerRadius(12)
+        VStack {
+            Text(overlay.text)
+                .font(.caption)
+                .foregroundColor(.white)
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(overlay.type.color.opacity(0.8))
+                )
         }
-        .accessibilityLabel(title)
-        .accessibilityHint("Double tap to \(title.lowercased())")
+        .accessibilityLabel("AR overlay: \(overlay.text)")
+    }
+}
+
+struct ARObstacleMarkerView: View {
+    let marker: ARObstacleMarker
+    
+    var body: some View {
+        Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundColor(marker.severity.color)
+            .font(.title)
+            .accessibilityLabel("Obstacle marker: \(marker.severity.rawValue) severity")
+    }
+}
+
+struct ARNavigationPathView: View {
+    let path: ARPathOverlay
+    
+    var body: some View {
+        // AR navigation path visualization
+        Rectangle()
+            .fill(path.pathColor.opacity(0.6))
+            .frame(height: 4)
+            .accessibilityLabel("Navigation path displayed")
+    }
+}
+
+struct HandTrackingIndicator: View {
+    var body: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Image(systemName: "hand.raised.fill")
+                    .foregroundColor(.blue)
+                    .font(.caption)
+            }
+            Spacer()
+        }
+        .padding()
+    }
+}
+
+struct EyeTrackingFocusIndicator: View {
+    var body: some View {
+        Circle()
+            .stroke(Color.blue, lineWidth: 2)
+            .frame(width: 20, height: 20)
+            .position(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY)
+    }
+}
+
+struct CommunityMembersOverlay: View {
+    var body: some View {
+        VStack {
+            Text("Community Members Nearby")
+                .font(.headline)
+                .foregroundColor(.white)
+            
+            // Community members list
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.black.opacity(0.8))
+        )
     }
 }
 
 // MARK: - Extensions
 
-extension View {
-    func pulsating() -> some View {
-        self.opacity(0.8)
-            .scaleEffect(1.0)
-            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: UUID())
+extension OverlayType {
+    var color: Color {
+        switch self {
+        case .info: return .blue
+        case .warning: return .orange
+        case .navigation: return .green
+        case .community: return .purple
+        case .userMarker: return .yellow
+        }
     }
+}
+
+extension ObstacleSeverity {
+    var color: Color {
+        switch self {
+        case .low: return .yellow
+        case .medium: return .orange
+        case .high: return .red
+        case .critical: return .red
+        }
+    }
+}
+
+extension DeviceType {
+    var icon: String {
+        switch self {
+        case .light: return "lightbulb.fill"
+        case .switch: return "switch.2"
+        case .lock: return "lock.fill"
+        case .thermostat: return "thermometer"
+        case .speaker: return "speaker.wave.2.fill"
+        case .security: return "shield.fill"
+        case .sensor: return "sensor.tag.radiowaves.forward.fill"
+        case .other: return "device.mac"
+        }
+    }
+}
+
+// ... existing code ... 
 } 
