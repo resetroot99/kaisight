@@ -1081,7 +1081,7 @@ enum MemorySource: String, Codable {
     case conversation = "conversation"
     case observation = "observation"
     case consolidation = "consolidation"
-    case import = "import"
+    case imported = "imported"
 }
 
 enum Sentiment: String, Codable {

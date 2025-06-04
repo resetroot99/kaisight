@@ -56,7 +56,9 @@ class VoiceAgentLoop: NSObject, ObservableObject {
                 case .authorized:
                     ProductionConfig.log("Speech recognition authorized")
                 case .denied:
+                    break
                 case .restricted, .notDetermined:
+                    break
                 @unknown default:
                     break
                 }

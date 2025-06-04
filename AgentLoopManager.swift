@@ -3,7 +3,7 @@ import AVFoundation
 import Speech
 import Combine
 
-class AgentLoopManager: NSObject, ObservableObject {
+class AgentLoopManager: NSObject, ObservableObject, AutonomousDecisionEngineDelegate {
     @Published var agentState: AgentState = .idle
     @Published var isListening = false
     @Published var conversationActive = false
@@ -221,14 +221,12 @@ class AgentLoopManager: NSObject, ObservableObject {
     
     // MARK: - Decision Engine Integration
     
-    extension AgentLoopManager: AutonomousDecisionEngineDelegate {
-        func decisionEngine(_ engine: AutonomousDecisionEngine, detectedRisk risk: EnvironmentalRisk) {
-            handleDetectedRisk(risk)
-        }
-        
-        func decisionEngine(_ engine: AutonomousDecisionEngine, recommendsAction action: ProactiveAction) {
-            executeProactiveAction(action)
-        }
+    func decisionEngine(_ engine: AutonomousDecisionEngine, detectedRisk risk: EnvironmentalRisk) {
+        handleDetectedRisk(risk)
+    }
+    
+    func decisionEngine(_ engine: AutonomousDecisionEngine, recommendsAction action: ProactiveAction) {
+        executeProactiveAction(action)
     }
     
     private func executeProactiveAction(_ action: ProactiveAction) {

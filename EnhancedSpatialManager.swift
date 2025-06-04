@@ -1319,7 +1319,7 @@ struct SpatialObstacle {
 }
 
 enum ObstacleType {
-    case static
+    case stationary
     case dynamic
     case person
     case vehicle

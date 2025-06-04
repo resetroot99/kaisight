@@ -3,7 +3,6 @@ import SwiftUI
 import Combine
 import CoreLocation
 import HealthKit
-import WebRTC
 import UserNotifications
 
 class CaregiverDashboard: ObservableObject {
@@ -22,8 +21,8 @@ class CaregiverDashboard: ObservableObject {
     private let healthStore = HKHealthStore()
     private let notificationCenter = UNUserNotificationCenter.current()
     
-    // WebRTC for video assistance
-    private var webRTCClient: WebRTCClient?
+    // Video assistance (native iOS video calling functionality)
+    private var videoClient: VideoClient?
     private var signaling: SignalingClient?
     
     // Real-time monitoring
@@ -39,7 +38,7 @@ class CaregiverDashboard: ObservableObject {
         setupCaregiverDashboard()
         setupHealthKitIntegration()
         setupNotifications()
-        setupWebRTC()
+        setupVideoClient()
     }
     
     deinit {
@@ -138,16 +137,16 @@ class CaregiverDashboard: ObservableObject {
         }
     }
     
-    // MARK: - WebRTC Video Setup
+    // MARK: - Video Assistance
     
-    private func setupWebRTC() {
-        webRTCClient = WebRTCClient()
+    private func setupVideoClient() {
+        videoClient = VideoClient()
         signaling = SignalingClient()
         
-        webRTCClient?.delegate = self
+        videoClient?.delegate = self
         signaling?.delegate = self
         
-        Config.debugLog("WebRTC video assistance configured")
+        Config.debugLog("Video assistance configured")
     }
     
     // MARK: - Notifications
@@ -460,8 +459,8 @@ class CaregiverDashboard: ObservableObject {
         
         videoSessions.append(session)
         
-        // Initiate WebRTC connection
-        webRTCClient?.initiateCall(to: clientID.uuidString) { [weak self] success in
+        // Initiate video connection
+        videoClient?.initiateCall(to: clientID.uuidString) { [weak self] success in
             DispatchQueue.main.async {
                 if success {
                     self?.updateVideoSessionStatus(session.id, status: .connected)
@@ -483,7 +482,7 @@ class CaregiverDashboard: ObservableObject {
         
         videoSessions[sessionIndex] = session
         
-        webRTCClient?.endCall()
+        videoClient?.endCall()
         speechOutput.speak("Video call ended")
     }
     
@@ -776,7 +775,7 @@ extension CaregiverDashboard: HealthMonitorDelegate {
     }
 }
 
-extension CaregiverDashboard: WebRTCClientDelegate {
+extension CaregiverDashboard: VideoClientDelegate {
     func didConnectToClient(_ clientID: String) {
         speechOutput.speak("Video call connected")
     }
@@ -1149,7 +1148,7 @@ protocol HealthMonitorDelegate: AnyObject {
     func didReceiveHealthUpdate(_ update: HealthDataPoint)
 }
 
-protocol WebRTCClientDelegate: AnyObject {
+protocol VideoClientDelegate: AnyObject {
     func didConnectToClient(_ clientID: String)
     func didDisconnectFromClient(_ clientID: String)
     func didFailToConnect(error: Error)
@@ -1161,23 +1160,23 @@ protocol SignalingClientDelegate: AnyObject {
 
 // MARK: - Network Classes
 
-class WebRTCClient {
-    weak var delegate: WebRTCClientDelegate?
+class VideoClient {
+    weak var delegate: VideoClientDelegate?
     
     func initiateCall(to clientID: String, completion: @escaping (Bool) -> Void) {
-        // WebRTC call implementation
+        // Video call implementation
         completion(true) // Placeholder
     }
     
     func endCall() {
-        // End WebRTC call
+        // End video call
     }
 }
 
 class SignalingClient {
     weak var delegate: SignalingClientDelegate?
     
-    // WebRTC signaling implementation
+    // Video signaling implementation
 }
 
 class HealthMonitor {

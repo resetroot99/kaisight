@@ -2,6 +2,7 @@ import Foundation
 
 struct Config {
     // MARK: - API Keys (Replace with your actual keys)
+    // 🔑 REPLACE THIS with your new OpenAI API key (format: sk-proj-...)
     static let openAIAPIKey = "your-openai-api-key-here"
     
     // MARK: - Testing Configuration

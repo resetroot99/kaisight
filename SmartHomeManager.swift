@@ -175,22 +175,22 @@ class SmartHomeManager: NSObject, ObservableObject {
     func handleVoiceCommand(_ command: String) {
         let lowercased = command.lowercased()
         
-        switch {
-        case lowercased.contains("turn on") && lowercased.contains("light"):
+        switch lowercased {
+        case let cmd where cmd.contains("turn on") && cmd.contains("light"):
             handleLightCommand(command: "on", room: extractRoom(from: command))
-        case lowercased.contains("turn off") && lowercased.contains("light"):
+        case let cmd where cmd.contains("turn off") && cmd.contains("light"):
             handleLightCommand(command: "off", room: extractRoom(from: command))
-        case lowercased.contains("unlock"):
+        case let cmd where cmd.contains("unlock"):
             handleLockCommand(command: "unlock", location: extractLocation(from: command))
-        case lowercased.contains("lock"):
+        case let cmd where cmd.contains("lock"):
             handleLockCommand(command: "lock", location: extractLocation(from: command))
-        case lowercased.contains("accessibility mode"):
+        case let cmd where cmd.contains("accessibility mode"):
             activateAccessibilityMode()
-        case lowercased.contains("navigation lighting"):
+        case let cmd where cmd.contains("navigation lighting"):
             activateNavigationLighting()
-        case lowercased.contains("safety protocol"):
+        case let cmd where cmd.contains("safety protocol"):
             activateSafetyProtocol()
-        case lowercased.contains("emergency"):
+        case let cmd where cmd.contains("emergency"):
             activateEmergencyMode()
         default:
             speechOutput.speak("Command not recognized. Try saying 'turn on lights' or 'unlock door'")

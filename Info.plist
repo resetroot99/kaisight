@@ -30,6 +30,8 @@
 	<string>Location services help provide navigation assistance and describe your current surroundings.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Location services enable navigation assistance and location-aware features for blind users.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Bluetooth access is used to connect with health and accessibility devices.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
@@ -62,4 +64,4 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
-</plist> 
+</plist>

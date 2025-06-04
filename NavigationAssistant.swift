@@ -625,6 +625,7 @@ extension NavigationAssistant: CLLocationManagerDelegate {
             locationManager.startUpdatingLocation()
             locationManager.startUpdatingHeading()
         case .denied, .restricted:
+            break
         case .notDetermined:
             locationManager.requestWhenInUseAuthorization()
         @unknown default:
